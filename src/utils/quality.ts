@@ -63,7 +63,3 @@ export function shouldUseBloom(quality: QualityLevel): boolean {
 export function shouldUseAntialias(quality: QualityLevel): boolean {
   return quality !== 'low';
 }
-
-export function getAnalyserPresetForQuality(quality: QualityLevel): 'responsive' | 'smooth' {
-  return quality === 'low' ? 'responsive' : 'smooth';
-}

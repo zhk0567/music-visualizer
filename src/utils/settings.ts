@@ -44,6 +44,12 @@ function pickEnum<T extends string>(value: unknown, allowed: T[], fallback: T): 
   return typeof value === 'string' && (allowed as string[]).includes(value) ? (value as T) : fallback;
 }
 
+function parseBool(value: string | null): boolean | undefined {
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  return undefined;
+}
+
 export function normalizeSettings(raw: unknown): AppSettings {
   const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
   return {
@@ -91,10 +97,14 @@ export function readSettingsFromUrl(): Partial<AppSettings> | null {
   const mode = params.get('mode');
   const theme = params.get('theme');
   const quality = params.get('quality');
+  const loop = parseBool(params.get('loop'));
+  const sensitivity = params.get('sensitivity');
 
-  if (mode) partial.visualizer = mode as VisualizerName;
-  if (theme) partial.theme = theme as ThemeName;
-  if (quality) partial.quality = quality as QualityLevel;
+  if (mode) partial.visualizer = pickEnum(mode, VISUALIZERS, DEFAULTS.visualizer);
+  if (theme) partial.theme = pickEnum(theme, THEME_LIST, DEFAULTS.theme);
+  if (quality) partial.quality = pickEnum(quality, QUALITIES, DEFAULTS.quality);
+  if (loop !== undefined) partial.loop = loop;
+  if (sensitivity !== null) partial.sensitivity = clamp(Number(sensitivity), 0.5, 3, DEFAULTS.sensitivity);
 
   return partial;
 }
@@ -104,5 +114,17 @@ export function syncSettingsToUrl(settings: AppSettings): void {
   url.searchParams.set('mode', settings.visualizer);
   url.searchParams.set('theme', settings.theme);
   url.searchParams.set('quality', settings.quality);
+  url.searchParams.set('loop', String(settings.loop));
+  url.searchParams.set('sensitivity', String(settings.sensitivity));
   window.history.replaceState({}, '', url);
+}
+
+export function buildShareUrl(settings: AppSettings): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('mode', settings.visualizer);
+  url.searchParams.set('theme', settings.theme);
+  url.searchParams.set('quality', settings.quality);
+  url.searchParams.set('loop', String(settings.loop));
+  url.searchParams.set('sensitivity', String(settings.sensitivity));
+  return url.toString();
 }

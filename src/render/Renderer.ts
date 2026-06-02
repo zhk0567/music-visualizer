@@ -2,10 +2,7 @@ import * as THREE from 'three';
 import type { AudioEngine, AudioData } from '../audio/AudioEngine';
 import { BeatDetector } from '../audio/BeatDetector';
 import { BaseVisualizer } from './visualizers/BaseVisualizer';
-import { SpectrumBars } from './visualizers/SpectrumBars';
-import { Waveform } from './visualizers/Waveform';
-import { ParticleField } from './visualizers/ParticleField';
-import { PostProcessing } from './PostProcessing';
+import type { PostProcessing } from './PostProcessing';
 import { THEMES, type ThemeName, type ThemeColors } from './themes';
 import {
   getParticleCount,
@@ -13,6 +10,7 @@ import {
   getSegmentCount,
   getMaxDpr,
   shouldUseBloom,
+  shouldUseAntialias,
   type QualityLevel,
 } from '../utils/quality';
 
@@ -31,16 +29,18 @@ export class Renderer {
   private audioEngine: AudioEngine | null = null;
   private beatDetector = new BeatDetector();
   private postProcessing: PostProcessing | null = null;
+  private postProcessingPromise: Promise<PostProcessing> | null = null;
   private animationId: number | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private clock = new THREE.Clock();
   private sensitivity = 1.5;
   private theme: ThemeColors = THEMES.neon;
   private quality: QualityLevel = 'medium';
   private running = false;
   private tickCallbacks: TickCallback[] = [];
-  private lastRenderMs = 0;
   private reduceMotion: boolean;
   private beatIntensity = 0;
+  private forceFullSpeed = false;
 
   private ambientLight!: THREE.AmbientLight;
   private pointLight!: THREE.PointLight;
@@ -59,12 +59,7 @@ export class Renderer {
     this.canvas = canvas;
     this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: true,
-      preserveDrawingBuffer: true,
-    });
+    this.renderer = this.createWebGLRenderer('medium');
     this.applyQualitySettings('medium');
 
     this.scene = new THREE.Scene();
@@ -75,16 +70,40 @@ export class Renderer {
     this.camera.lookAt(0, 1, 0);
 
     this.setupSceneLighting();
-    this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
+    void this.ensurePostProcessing();
     this.handleResize();
     window.addEventListener('resize', this.handleResize);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
+  }
+
+  private createWebGLRenderer(quality: QualityLevel): THREE.WebGLRenderer {
+    return new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: shouldUseAntialias(quality),
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
   }
 
   private applyQualitySettings(quality: QualityLevel): void {
     const maxDpr = getMaxDpr(quality);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
     this.renderer.setClearColor(this.theme.background, 1);
+  }
+
+  private async ensurePostProcessing(): Promise<PostProcessing> {
+    if (this.postProcessing) return this.postProcessing;
+    if (!this.postProcessingPromise) {
+      this.postProcessingPromise = import('./PostProcessing').then(({ PostProcessing }) => {
+        const pp = new PostProcessing(this.renderer, this.scene, this.camera);
+        pp.setEnabled(shouldUseBloom(this.quality));
+        const accentStrength = this.theme.name === 'sunset' ? 1.0 : this.theme.name === 'mono' ? 0.4 : 0.85;
+        pp.setBloomStrength(accentStrength);
+        this.postProcessing = pp;
+        return pp;
+      });
+    }
+    return this.postProcessingPromise;
   }
 
   private setupSceneLighting(): void {
@@ -110,9 +129,18 @@ export class Renderer {
     return this.canvas;
   }
 
+  getCaptureStream(fps = 30): MediaStream {
+    return this.canvas.captureStream(fps);
+  }
+
+  wakeUp(): void {
+    this.forceFullSpeed = true;
+  }
+
   async captureScreenshot(): Promise<Blob | null> {
-    if (this.postProcessing?.isEnabled()) {
-      return this.postProcessing.captureToBlob();
+    const pp = await this.ensurePostProcessing();
+    if (pp.isEnabled()) {
+      return pp.captureToBlob();
     }
     this.renderer.render(this.scene, this.camera);
     return new Promise((resolve) => {
@@ -123,11 +151,24 @@ export class Renderer {
   setQuality(quality: QualityLevel): void {
     const prev = this.quality;
     this.quality = quality;
-    this.applyQualitySettings(quality);
-    this.postProcessing?.setEnabled(shouldUseBloom(quality));
-    if (prev !== quality) {
-      this.setVisualizer(this.currentName, true);
+    const needsRendererRecreate = shouldUseAntialias(prev) !== shouldUseAntialias(quality);
+
+    if (needsRendererRecreate) {
+      this.postProcessing?.dispose();
+      this.postProcessing = null;
+      this.postProcessingPromise = null;
+      this.renderer.dispose();
+      this.renderer = this.createWebGLRenderer(quality);
+      this.handleResize();
+      void this.ensurePostProcessing();
     }
+
+    this.applyQualitySettings(quality);
+    void this.ensurePostProcessing().then((pp) => pp.setEnabled(shouldUseBloom(quality)));
+    if (prev !== quality) {
+      void this.setVisualizer(this.currentName, true);
+    }
+    this.wakeUp();
   }
 
   getQuality(): QualityLevel {
@@ -144,7 +185,7 @@ export class Renderer {
     };
   }
 
-  setVisualizer(name: VisualizerName, forceRecreate = false): void {
+  async setVisualizer(name: VisualizerName, forceRecreate = false): Promise<void> {
     if (!forceRecreate && this.currentName === name && this.visualizer) return;
 
     this.clearVisualizer();
@@ -152,16 +193,23 @@ export class Renderer {
     const options = this.buildVisualizerOptions();
 
     switch (name) {
-      case 'spectrum':
+      case 'spectrum': {
+        const { SpectrumBars } = await import('./visualizers/SpectrumBars');
         this.visualizer = new SpectrumBars(this.scene, options);
         break;
-      case 'waveform':
+      }
+      case 'waveform': {
+        const { Waveform } = await import('./visualizers/Waveform');
         this.visualizer = new Waveform(this.scene, options);
         break;
-      case 'particles':
+      }
+      case 'particles': {
+        const { ParticleField } = await import('./visualizers/ParticleField');
         this.visualizer = new ParticleField(this.scene, options);
         break;
+      }
     }
+    this.wakeUp();
   }
 
   getVisualizerName(): VisualizerName {
@@ -181,7 +229,8 @@ export class Renderer {
     this.pointLight.color.setHex(this.theme.pointLight);
     this.visualizer?.setTheme(this.theme);
     const accentStrength = name === 'sunset' ? 1.0 : name === 'mono' ? 0.4 : 0.85;
-    this.postProcessing?.setBloomStrength(accentStrength);
+    void this.ensurePostProcessing().then((pp) => pp.setBloomStrength(accentStrength));
+    this.wakeUp();
   }
 
   getTheme(): ThemeName {
@@ -196,7 +245,7 @@ export class Renderer {
     if (this.running) return;
     this.running = true;
     this.clock.start();
-    this.animate();
+    this.scheduleNextFrame(false);
   }
 
   stop(): void {
@@ -205,44 +254,67 @@ export class Renderer {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
   }
 
-  private animate = (): void => {
+  private scheduleNextFrame(idle: boolean): void {
     if (!this.running) return;
+    if (idle) {
+      this.idleTimer = setTimeout(this.runFrame, IDLE_FRAME_MS);
+    } else {
+      this.animationId = requestAnimationFrame(this.runFrame);
+    }
+  }
 
-    this.animationId = requestAnimationFrame(this.animate);
+  private runFrame = (): void => {
+    if (!this.running) return;
+    this.animationId = null;
+    this.idleTimer = null;
+
     const delta = this.clock.getDelta();
+    const isActive = this.audioEngine?.getIsPlaying() ?? false;
 
     let data: AudioData = {
       frequency: new Uint8Array(0),
       timeDomain: new Uint8Array(0),
     };
 
-    const isActive = this.audioEngine?.getIsPlaying() ?? false;
-
     if (this.audioEngine) {
       data = this.audioEngine.getAudioData();
     }
 
-    this.beatIntensity = this.beatDetector.update(data.frequency, delta);
-
     let envelope = 0;
-    if (this.visualizer) {
-      envelope = this.visualizer.applyEnvelope(isActive, delta);
-      this.visualizer.update(data, delta, envelope, this.beatIntensity);
+    const shouldRunVisual = isActive || this.forceFullSpeed;
+
+    const motionScale = this.reduceMotion ? 0.35 : 1;
+
+    if (shouldRunVisual) {
+      this.beatIntensity = this.beatDetector.update(data.frequency, delta);
+      if (this.visualizer) {
+        envelope = this.visualizer.applyEnvelope(isActive, delta, motionScale);
+        this.visualizer.update(data, delta, envelope, this.beatIntensity);
+      }
+      for (const cb of this.tickCallbacks) {
+        cb(delta);
+      }
+    } else if (this.visualizer) {
+      envelope = this.visualizer.applyEnvelope(false, delta, motionScale);
     }
 
-    for (const cb of this.tickCallbacks) {
-      cb(delta);
-    }
+    this.forceFullSpeed = false;
 
     const isIdle = !isActive && envelope < 0.05;
-    const now = performance.now();
-    if (isIdle && now - this.lastRenderMs < IDLE_FRAME_MS) {
-      return;
+    if (!isIdle) {
+      this.renderScene();
     }
-    this.lastRenderMs = now;
 
+    this.scheduleNextFrame(isIdle);
+  };
+
+  private renderScene(): void {
     if (!this.reduceMotion) {
       const beatZoom = 1 + this.beatIntensity * 0.03;
       this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
@@ -255,7 +327,7 @@ export class Renderer {
     } else {
       this.renderer.render(this.scene, this.camera);
     }
-  };
+  }
 
   private clearVisualizer(): void {
     if (this.visualizer) {

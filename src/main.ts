@@ -22,6 +22,14 @@ function setLoading(loading: boolean): void {
   overlay?.classList.toggle('hidden', !loading);
 }
 
+function showToast(message: string): void {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  window.setTimeout(() => toast.classList.add('hidden'), 2800);
+}
+
 function checkWebGL(): boolean {
   try {
     const canvas = document.createElement('canvas');
@@ -31,7 +39,7 @@ function checkWebGL(): boolean {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   if (!checkWebGL()) {
     showError('您的浏览器不支持 WebGL，无法运行可视化效果。请使用 Chrome、Edge 或 Firefox 最新版。');
     return;
@@ -62,12 +70,13 @@ function main(): void {
   renderer.setQuality(settings.quality);
   renderer.setSensitivity(settings.sensitivity);
   renderer.setTheme(settings.theme);
-  renderer.setVisualizer(settings.visualizer);
+  await renderer.setVisualizer(settings.visualizer);
   renderer.start();
 
   const controls = new Controls(controlsRoot, app, engine, renderer, {
     onLoadingChange: setLoading,
     onError: showError,
+    onToast: showToast,
   });
   controls.applySettings(settings);
   syncSettingsToUrl(settings);
@@ -82,4 +91,4 @@ function main(): void {
   window.addEventListener('beforeunload', cleanup);
 }
 
-main();
+void main();

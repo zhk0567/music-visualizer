@@ -3,9 +3,11 @@ import type { Renderer, VisualizerName } from '../render/Renderer';
 import type { ThemeName } from '../render/themes';
 import { THEMES, THEME_LIST } from '../render/themes';
 import type { AnalyserPreset, AppSettings } from '../utils/settings';
-import { saveSettings } from '../utils/settings';
+import { saveSettings, loadSettings, buildShareUrl } from '../utils/settings';
 import type { QualityLevel } from '../utils/quality';
 import { QUALITY_LABELS, QUALITY_LIST } from '../utils/quality';
+import { CanvasRecorder } from '../utils/recorder';
+import { loadPresets, addPreset, deletePreset, type NamedPreset } from '../utils/presets';
 
 const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.webm'];
 
@@ -24,6 +26,7 @@ function isAudioFile(file: File): boolean {
 export interface ControlsCallbacks {
   onLoadingChange?: (loading: boolean) => void;
   onError?: (message: string) => void;
+  onToast?: (message: string) => void;
 }
 
 export class Controls {
@@ -41,6 +44,12 @@ export class Controls {
   private volumeSlider: HTMLInputElement;
   private sensitivitySlider: HTMLInputElement;
   private qualitySelect: HTMLSelectElement;
+  private analyserBtn: HTMLButtonElement;
+  private recordBtn: HTMLButtonElement;
+  private presetSelect: HTMLSelectElement;
+  private presetSaveBtn: HTMLButtonElement;
+  private presetDeleteBtn: HTMLButtonElement;
+  private copyLinkBtn: HTMLButtonElement;
   private timeDisplay: HTMLElement;
   private sourceLabel: HTMLElement;
   private emptyState: HTMLElement | null;
@@ -52,6 +61,7 @@ export class Controls {
   private isSeeking = false;
   private onLoadingChange?: (loading: boolean) => void;
   private onError?: (message: string) => void;
+  private onToast?: (message: string) => void;
   private onKeyDown: (e: KeyboardEvent) => void;
   private onMouseMove: () => void;
   private onDragOver: (e: DragEvent) => void;
@@ -62,6 +72,9 @@ export class Controls {
   private tickCallback: (delta: number) => void;
   private unsubscribePlayback: (() => void) | null = null;
   private helpOverlay: HTMLElement | null;
+  private helpDismissBtn: HTMLButtonElement | null;
+  private recorder = new CanvasRecorder();
+  private presets: NamedPreset[] = [];
 
   constructor(
     root: HTMLElement,
@@ -76,9 +89,11 @@ export class Controls {
     this.renderer = renderer;
     this.onLoadingChange = callbacks?.onLoadingChange;
     this.onError = callbacks?.onError;
+    this.onToast = callbacks?.onToast;
     this.emptyState = document.getElementById('empty-state');
     this.demoBtn = document.getElementById('demo-btn') as HTMLButtonElement | null;
     this.helpOverlay = document.getElementById('help-overlay');
+    this.helpDismissBtn = document.getElementById('help-dismiss') as HTMLButtonElement | null;
 
     this.root.innerHTML = '';
     this.panel = document.createElement('div');
@@ -94,7 +109,9 @@ export class Controls {
     this.fileBtn = this.createButton('选择文件', () => this.fileInput.click());
     this.micBtn = this.createButton('麦克风', () => void this.handleMic());
     this.loopBtn = this.createButton('循环', () => this.toggleLoop());
+    this.loopBtn.setAttribute('aria-pressed', 'true');
     this.muteBtn = this.createButton('静音', () => this.toggleMute());
+    this.muteBtn.setAttribute('aria-pressed', 'false');
 
     this.playBtn = document.createElement('button');
     this.playBtn.className = 'btn btn-primary';
@@ -105,6 +122,8 @@ export class Controls {
     const changeBtn = this.createButton('更换', () => this.changeAudio());
     const fullscreenBtn = this.createButton('全屏', () => this.toggleFullscreen());
     const screenshotBtn = this.createButton('截图', () => this.takeScreenshot());
+    this.recordBtn = this.createButton('录制', () => void this.toggleRecording());
+    this.copyLinkBtn = this.createButton('复制链接', () => this.copyShareLink());
 
     this.progressBar = document.createElement('input');
     this.progressBar.type = 'range';
@@ -162,10 +181,17 @@ export class Controls {
     this.qualitySelect.addEventListener('change', () => {
       const quality = this.qualitySelect.value as QualityLevel;
       this.renderer.setQuality(quality);
-      const preset: AnalyserPreset = quality === 'low' ? 'responsive' : 'smooth';
-      this.engine.setAnalyserPreset(preset);
-      saveSettings({ quality, analyserPreset: preset });
+      saveSettings({ quality });
     });
+
+    this.analyserBtn = this.createButton('分析: 平滑', () => this.toggleAnalyserPreset());
+
+    this.presetSelect = document.createElement('select');
+    this.presetSelect.className = 'btn preset-select';
+    this.presetSelect.setAttribute('aria-label', '预设');
+    this.presetSelect.addEventListener('change', () => void this.applySelectedPreset());
+    this.presetSaveBtn = this.createButton('保存预设', () => this.saveCurrentPreset());
+    this.presetDeleteBtn = this.createButton('删除预设', () => this.removeSelectedPreset());
 
     const row0 = document.createElement('div');
     row0.className = 'controls-row center';
@@ -177,7 +203,11 @@ export class Controls {
 
     const row1b = document.createElement('div');
     row1b.className = 'controls-row center';
-    row1b.append(fullscreenBtn, screenshotBtn, this.qualitySelect);
+    row1b.append(fullscreenBtn, screenshotBtn, this.recordBtn, this.copyLinkBtn, this.qualitySelect, this.analyserBtn);
+
+    const rowPreset = document.createElement('div');
+    rowPreset.className = 'controls-row center';
+    rowPreset.append(this.presetSelect, this.presetSaveBtn, this.presetDeleteBtn);
 
     const row2 = document.createElement('div');
     row2.className = 'controls-row';
@@ -199,7 +229,8 @@ export class Controls {
       { name: 'waveform' as const, label: '波形' },
       { name: 'particles' as const, label: '粒子' },
     ]) {
-      const btn = this.createButton(mode.label, () => this.setMode(mode.name));
+      const btn = this.createButton(mode.label, () => void this.setMode(mode.name));
+      btn.setAttribute('aria-pressed', 'false');
       this.modeButtons.set(mode.name, btn);
       modeTabs.appendChild(btn);
     }
@@ -211,12 +242,13 @@ export class Controls {
     themeTabs.className = 'mode-tabs';
     for (const themeName of THEME_LIST) {
       const btn = this.createButton(THEMES[themeName].label, () => this.setTheme(themeName));
+      btn.setAttribute('aria-pressed', 'false');
       this.themeButtons.set(themeName, btn);
       themeTabs.appendChild(btn);
     }
     row5.appendChild(themeTabs);
 
-    this.panel.append(row0, row1, row1b, row2, row3, row4, row5);
+    this.panel.append(row0, row1, row1b, rowPreset, row2, row3, row4, row5);
     this.root.append(this.fileInput, this.panel);
 
     this.fileInput.addEventListener('change', () => void this.handleFileSelect());
@@ -264,12 +296,17 @@ export class Controls {
       } else if (event === 'playing') {
         this.playBtn.textContent = '⏸';
       }
+      if (event === 'ended') {
+        this.onToast?.('播放完毕');
+      }
     });
 
-    document.getElementById('help-dismiss')?.addEventListener('click', () => {
-      this.helpOverlay?.classList.add('hidden');
+    this.helpDismissBtn?.addEventListener('click', () => this.closeHelp());
+    this.helpOverlay?.addEventListener('click', (e) => {
+      if (e.target === this.helpOverlay) this.closeHelp();
     });
 
+    this.refreshPresetSelect();
     this.resetHideTimer();
   }
 
@@ -280,15 +317,18 @@ export class Controls {
     this.renderer.setSensitivity(settings.sensitivity);
     this.engine.setLoop(settings.loop);
     this.loopBtn.classList.toggle('active', settings.loop);
+    this.loopBtn.setAttribute('aria-pressed', String(settings.loop));
     this.engine.setAnalyserPreset(settings.analyserPreset);
+    this.updateAnalyserBtn(settings.analyserPreset);
     this.qualitySelect.value = settings.quality;
     this.renderer.setQuality(settings.quality);
-    this.setMode(settings.visualizer, false);
+    void this.setMode(settings.visualizer, false);
     this.setTheme(settings.theme, false);
     if (settings.muted) {
       this.engine.setMuted(true);
       this.muteBtn.classList.add('active');
       this.muteBtn.textContent = '取消静音';
+      this.muteBtn.setAttribute('aria-pressed', 'true');
     }
   }
 
@@ -339,8 +379,10 @@ export class Controls {
       await this.engine.ensureContext();
       try {
         await this.engine.loadFromUrl('/demo.mp3', '示例曲目');
+        this.onToast?.('已加载示例曲目');
       } catch {
         await this.engine.loadDemoTone();
+        this.onToast?.('已加载内置合成示例');
       }
       await this.engine.play();
       this.onSourceReady('file');
@@ -356,8 +398,11 @@ export class Controls {
     this.fileBtn.classList.toggle('active', source === 'file');
     this.micBtn.classList.toggle('active', source === 'mic');
     this.progressBar.disabled = source === 'mic';
+    this.loopBtn.disabled = source === 'mic';
+    this.loopBtn.style.opacity = source === 'mic' ? '0.45' : '1';
     this.updateSourceLabel();
     this.hideEmptyState();
+    this.renderer.wakeUp();
   }
 
   private async handleMic(): Promise<void> {
@@ -378,6 +423,7 @@ export class Controls {
       } else {
         await this.engine.play();
         this.playBtn.textContent = '⏸';
+        this.renderer.wakeUp();
       }
     } catch (err) {
       this.onError?.(err instanceof Error ? err.message : '播放失败');
@@ -388,6 +434,7 @@ export class Controls {
     const next = !this.engine.getLoop();
     this.engine.setLoop(next);
     this.loopBtn.classList.toggle('active', next);
+    this.loopBtn.setAttribute('aria-pressed', String(next));
     saveSettings({ loop: next });
   }
 
@@ -395,7 +442,21 @@ export class Controls {
     const muted = this.engine.toggleMute();
     this.muteBtn.classList.toggle('active', muted);
     this.muteBtn.textContent = muted ? '取消静音' : '静音';
+    this.muteBtn.setAttribute('aria-pressed', String(muted));
     saveSettings({ muted });
+  }
+
+  private toggleAnalyserPreset(): void {
+    const next: AnalyserPreset = this.engine.getAnalyserPreset() === 'smooth' ? 'responsive' : 'smooth';
+    this.engine.setAnalyserPreset(next);
+    this.updateAnalyserBtn(next);
+    saveSettings({ analyserPreset: next });
+  }
+
+  private updateAnalyserBtn(preset: AnalyserPreset): void {
+    this.analyserBtn.textContent = preset === 'smooth' ? '分析: 平滑' : '分析: 灵敏';
+    this.analyserBtn.classList.toggle('active', preset === 'responsive');
+    this.analyserBtn.setAttribute('aria-pressed', String(preset === 'responsive'));
   }
 
   private changeAudio(): void {
@@ -406,6 +467,8 @@ export class Controls {
     this.sourceLabel.textContent = '未选择音频';
     this.progressBar.value = '0';
     this.progressBar.disabled = true;
+    this.loopBtn.disabled = false;
+    this.loopBtn.style.opacity = '1';
     this.emptyState?.classList.remove('hidden');
   }
 
@@ -415,17 +478,26 @@ export class Controls {
     if (duration <= 0) return;
     const time = (Number(this.progressBar.value) / 100) * duration;
     this.engine.seek(time);
+    this.renderer.wakeUp();
   }
 
-  private setMode(name: VisualizerName, persist = true): void {
-    this.renderer.setVisualizer(name);
-    this.modeButtons.forEach((btn, key) => btn.classList.toggle('active', key === name));
+  private async setMode(name: VisualizerName, persist = true): Promise<void> {
+    await this.renderer.setVisualizer(name);
+    this.modeButtons.forEach((btn, key) => {
+      const active = key === name;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
     if (persist) saveSettings({ visualizer: name });
   }
 
   private setTheme(name: ThemeName, persist = true): void {
     this.renderer.setTheme(name);
-    this.themeButtons.forEach((btn, key) => btn.classList.toggle('active', key === name));
+    this.themeButtons.forEach((btn, key) => {
+      const active = key === name;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
     if (persist) saveSettings({ theme: name });
   }
 
@@ -448,15 +520,147 @@ export class Controls {
       a.download = `music-visualizer-${Date.now()}.png`;
       a.click();
       URL.revokeObjectURL(url);
+      this.onToast?.('截图已保存');
     });
   }
 
+  private async toggleRecording(): Promise<void> {
+    if (this.recorder.isRecording()) {
+      try {
+        const blob = await this.recorder.stop();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `music-visualizer-${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.recordBtn.textContent = '录制';
+        this.recordBtn.classList.remove('active');
+        this.onToast?.('录制已保存');
+      } catch (err) {
+        this.onError?.(err instanceof Error ? err.message : '停止录制失败');
+      }
+      return;
+    }
+
+    if (!CanvasRecorder.isSupported()) {
+      this.onError?.('当前浏览器不支持视频录制');
+      return;
+    }
+
+    try {
+      const stream = this.renderer.getCaptureStream(30);
+      this.recorder.start(stream, 30);
+      this.recordBtn.textContent = '停止';
+      this.recordBtn.classList.add('active');
+      this.onToast?.('开始录制…');
+    } catch (err) {
+      this.onError?.(err instanceof Error ? err.message : '开始录制失败');
+    }
+  }
+
+  private copyShareLink(): void {
+    const url = buildShareUrl(loadSettings());
+    void navigator.clipboard.writeText(url).then(
+      () => this.onToast?.('链接已复制'),
+      () => this.onError?.('复制失败，请手动复制地址栏链接'),
+    );
+  }
+
+  private refreshPresetSelect(): void {
+    this.presets = loadPresets();
+    this.presetSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '选择预设…';
+    this.presetSelect.appendChild(placeholder);
+    for (const preset of this.presets) {
+      const opt = document.createElement('option');
+      opt.value = preset.name;
+      opt.textContent = preset.name;
+      this.presetSelect.appendChild(opt);
+    }
+  }
+
+  private saveCurrentPreset(): void {
+    const name = window.prompt('预设名称');
+    if (!name?.trim()) return;
+    const settings = loadSettings();
+    this.presets = addPreset(name.trim(), settings);
+    this.refreshPresetSelect();
+    this.presetSelect.value = name.trim();
+    this.onToast?.(`预设「${name.trim()}」已保存`);
+  }
+
+  private removeSelectedPreset(): void {
+    const name = this.presetSelect.value;
+    if (!name) {
+      this.onError?.('请先选择要删除的预设');
+      return;
+    }
+    this.presets = deletePreset(name);
+    this.refreshPresetSelect();
+    this.onToast?.(`预设「${name}」已删除`);
+  }
+
+  private async applySelectedPreset(): Promise<void> {
+    const name = this.presetSelect.value;
+    if (!name) return;
+    const preset = this.presets.find((p) => p.name === name);
+    if (!preset) return;
+
+    this.sensitivitySlider.value = String(preset.sensitivity);
+    this.renderer.setSensitivity(preset.sensitivity);
+    this.qualitySelect.value = preset.quality;
+    this.renderer.setQuality(preset.quality);
+    await this.setMode(preset.visualizer, false);
+    this.setTheme(preset.theme, false);
+    saveSettings({
+      visualizer: preset.visualizer,
+      theme: preset.theme,
+      quality: preset.quality,
+      sensitivity: preset.sensitivity,
+    });
+    this.onToast?.(`已应用预设「${name}」`);
+  }
+
+  private isHelpOpen(): boolean {
+    return !!this.helpOverlay && !this.helpOverlay.classList.contains('hidden');
+  }
+
+  private openHelp(): void {
+    this.helpOverlay?.classList.remove('hidden');
+    this.helpDismissBtn?.focus();
+  }
+
+  private closeHelp(): void {
+    this.helpOverlay?.classList.add('hidden');
+  }
+
   private toggleHelp(): void {
-    this.helpOverlay?.classList.toggle('hidden');
+    if (this.isHelpOpen()) {
+      this.closeHelp();
+    } else {
+      this.openHelp();
+    }
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+
+    if (e.key === 'Escape' && this.isHelpOpen()) {
+      e.preventDefault();
+      this.closeHelp();
+      return;
+    }
+
+    if (this.isHelpOpen()) return;
+
+    if (e.key === '?' || (e.code === 'Slash' && e.shiftKey)) {
+      e.preventDefault();
+      this.toggleHelp();
+      return;
+    }
 
     switch (e.code) {
       case 'Space':
@@ -464,13 +668,13 @@ export class Controls {
         void this.togglePlay();
         break;
       case 'Digit1':
-        this.setMode('spectrum');
+        void this.setMode('spectrum');
         break;
       case 'Digit2':
-        this.setMode('waveform');
+        void this.setMode('waveform');
         break;
       case 'Digit3':
-        this.setMode('particles');
+        void this.setMode('particles');
         break;
       case 'Digit4':
         this.setTheme('neon');
@@ -486,11 +690,6 @@ export class Controls {
         break;
       case 'KeyM':
         this.toggleMute();
-        break;
-      case 'Slash':
-        if (e.shiftKey) {
-          this.toggleHelp();
-        }
         break;
     }
   }

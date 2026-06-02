@@ -3,8 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="浏览器端音乐可视化 — 支持本地音频、麦克风、频谱/波形/粒子三种模式" />
+    <meta name="theme-color" content="#0a0a0f" />
     <title>音乐可视化</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/src/styles/main.css" />
   </head>
   <body>
@@ -16,17 +19,18 @@
         <button id="demo-btn" class="btn demo-btn" type="button">试听示例</button>
       </div>
       <div id="controls-root"></div>
-      <div id="error-overlay" class="hidden">
+      <div id="error-overlay" class="hidden" role="alert" aria-live="polite">
         <p id="error-message"></p>
         <button id="error-dismiss" class="btn">关闭</button>
       </div>
-      <div id="loading-overlay" class="hidden">
+      <div id="loading-overlay" class="hidden" aria-live="polite">
         <div class="spinner"></div>
         <p>加载音频中...</p>
       </div>
-      <div id="help-overlay" class="hidden">
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+      <div id="help-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <div class="help-panel">
-          <h2>快捷键</h2>
+          <h2 id="help-title">快捷键</h2>
           <ul>
             <li><kbd>Space</kbd> 播放 / 暂停</li>
             <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> 切换频谱 / 波形 / 粒子</li>
@@ -34,6 +38,7 @@
             <li><kbd>F</kbd> 全屏</li>
             <li><kbd>M</kbd> 静音</li>
             <li><kbd>?</kbd> 显示 / 隐藏帮助</li>
+            <li><kbd>Esc</kbd> 关闭帮助</li>
           </ul>
           <button id="help-dismiss" class="btn" type="button">关闭</button>
         </div>

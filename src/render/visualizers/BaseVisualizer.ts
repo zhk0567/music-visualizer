@@ -44,9 +44,10 @@ export abstract class BaseVisualizer {
     // override in subclasses
   }
 
-  applyEnvelope(isActive: boolean, delta: number): number {
+  applyEnvelope(isActive: boolean, delta: number, motionScale = 1): number {
+    const rate = Math.min(1, delta * 4 * motionScale);
     const target = isActive ? 1 : 0;
-    this.activityLevel += (target - this.activityLevel) * Math.min(1, delta * 4);
+    this.activityLevel += (target - this.activityLevel) * rate;
     return this.activityLevel;
   }
 

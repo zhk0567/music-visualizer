@@ -3,43 +3,62 @@ import { BaseVisualizer, type VisualizerOptions } from './BaseVisualizer';
 import type { AudioData } from '../../audio/AudioEngine';
 import { hslToRgb } from '../themes';
 
+const vertexShader = `
+attribute vec3 instanceColor;
+varying vec3 vColor;
+#include <common>
+#include <instancematrix_pars_vertex>
+
+void main() {
+  #include <instancematrix_vertex>
+  vColor = instanceColor;
+  vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+const fragmentShader = `
+uniform float uBeat;
+uniform float uEnvelope;
+uniform vec3 uAccent;
+varying vec3 vColor;
+
+void main() {
+  vec3 base = vColor * (0.55 + uEnvelope * 0.35);
+  vec3 emissive = vColor * uBeat * 0.6 * uEnvelope + uAccent * uBeat * 0.25;
+  gl_FragColor = vec4(base + emissive, 1.0);
+}
+`;
+
 export class SpectrumBars extends BaseVisualizer {
   private mesh!: THREE.InstancedMesh;
-  private material!: THREE.MeshStandardMaterial;
+  private material!: THREE.ShaderMaterial;
   private dummy = new THREE.Object3D();
   private barCount: number;
   private heights!: Float32Array;
   private colors!: Float32Array;
+  private baseColors!: Float32Array;
 
   constructor(scene: THREE.Scene, options: VisualizerOptions = {}) {
     super(scene, options);
     this.barCount = options.barCount ?? 128;
     this.heights = new Float32Array(this.barCount);
     this.colors = new Float32Array(this.barCount * 3);
+    this.baseColors = new Float32Array(this.barCount * 3);
     this.init();
   }
 
   protected init(): void {
     const geometry = new THREE.BoxGeometry(0.08, 1, 0.08);
-    this.material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: new THREE.Color(this.theme.accent),
-      emissiveIntensity: 0.5,
-      metalness: 0.3,
-      roughness: 0.4,
-      vertexColors: true,
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uBeat: { value: 0 },
+        uEnvelope: { value: 1 },
+        uAccent: { value: new THREE.Color(this.theme.accent) },
+      },
+      vertexShader,
+      fragmentShader,
     });
-
-    this.material.onBeforeCompile = (shader) => {
-      shader.uniforms.uBeat = { value: 0 };
-      shader.uniforms.uEnvelope = { value: 1 };
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vColor.rgb * uBeat * 0.6 * uEnvelope;`,
-      );
-      this.material.userData.shader = shader;
-    };
 
     this.mesh = new THREE.InstancedMesh(geometry, this.material, this.barCount);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -58,6 +77,9 @@ export class SpectrumBars extends BaseVisualizer {
         this.theme.saturation,
         0.55,
       );
+      this.baseColors[i * 3] = r;
+      this.baseColors[i * 3 + 1] = g;
+      this.baseColors[i * 3 + 2] = b;
       this.colors[i * 3] = r;
       this.colors[i * 3 + 1] = g;
       this.colors[i * 3 + 2] = b;
@@ -77,22 +99,18 @@ export class SpectrumBars extends BaseVisualizer {
       this.mesh.setMatrixAt(i, this.dummy.matrix);
 
       const intensity = Math.min(1, (h / 3) * envelope);
-      const t = i / this.barCount;
-      const [r, g, b] = hslToRgb(
-        this.theme.hueStart + t * this.theme.hueRange,
-        this.theme.saturation,
-        0.4 + intensity * 0.3 + beat * 0.15,
-      );
-      this.colors[i * 3] = r;
-      this.colors[i * 3 + 1] = g;
-      this.colors[i * 3 + 2] = b;
+      const brightness = 0.4 + intensity * 0.3 + beat * 0.15;
+      const base = i * 3;
+      this.colors[base] = this.baseColors[base] * brightness;
+      this.colors[base + 1] = this.baseColors[base + 1] * brightness;
+      this.colors[base + 2] = this.baseColors[base + 2] * brightness;
     }
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
   protected onThemeChanged(): void {
-    this.material.emissive.setHex(this.theme.accent);
+    this.material.uniforms.uAccent.value.setHex(this.theme.accent);
     this.refreshThemeColors();
   }
 
@@ -109,13 +127,8 @@ export class SpectrumBars extends BaseVisualizer {
     }
 
     this.layoutBars(envelope, beat);
-    this.material.emissiveIntensity = 0.4 + envelope * 0.4 + beat * 0.6;
-
-    const shader = this.material.userData.shader as { uniforms: Record<string, { value: number }> } | undefined;
-    if (shader?.uniforms) {
-      shader.uniforms.uBeat.value = beat;
-      shader.uniforms.uEnvelope.value = envelope;
-    }
+    this.material.uniforms.uBeat.value = beat;
+    this.material.uniforms.uEnvelope.value = envelope;
   }
 
   dispose(): void {
