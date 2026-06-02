@@ -4,18 +4,39 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>音乐可视化</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/src/styles/main.css" />
   </head>
   <body>
     <div id="app">
       <canvas id="canvas"></canvas>
+      <div id="empty-state">
+        <p class="empty-title">音乐可视化</p>
+        <p class="empty-desc">拖放音频文件到此处，或点击选择文件 / 启用麦克风</p>
+        <button id="demo-btn" class="btn demo-btn" type="button">试听示例</button>
+      </div>
       <div id="controls-root"></div>
       <div id="error-overlay" class="hidden">
         <p id="error-message"></p>
+        <button id="error-dismiss" class="btn">关闭</button>
       </div>
       <div id="loading-overlay" class="hidden">
         <div class="spinner"></div>
         <p>加载音频中...</p>
+      </div>
+      <div id="help-overlay" class="hidden">
+        <div class="help-panel">
+          <h2>快捷键</h2>
+          <ul>
+            <li><kbd>Space</kbd> 播放 / 暂停</li>
+            <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> 切换频谱 / 波形 / 粒子</li>
+            <li><kbd>4</kbd> <kbd>5</kbd> <kbd>6</kbd> 切换主题</li>
+            <li><kbd>F</kbd> 全屏</li>
+            <li><kbd>M</kbd> 静音</li>
+            <li><kbd>?</kbd> 显示 / 隐藏帮助</li>
+          </ul>
+          <button id="help-dismiss" class="btn" type="button">关闭</button>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

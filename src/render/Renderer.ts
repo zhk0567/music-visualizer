@@ -1,11 +1,25 @@
 import * as THREE from 'three';
 import type { AudioEngine, AudioData } from '../audio/AudioEngine';
+import { BeatDetector } from '../audio/BeatDetector';
 import { BaseVisualizer } from './visualizers/BaseVisualizer';
 import { SpectrumBars } from './visualizers/SpectrumBars';
 import { Waveform } from './visualizers/Waveform';
 import { ParticleField } from './visualizers/ParticleField';
+import { PostProcessing } from './PostProcessing';
+import { THEMES, type ThemeName, type ThemeColors } from './themes';
+import {
+  getParticleCount,
+  getBarCount,
+  getSegmentCount,
+  getMaxDpr,
+  shouldUseBloom,
+  type QualityLevel,
+} from '../utils/quality';
 
 export type VisualizerName = 'spectrum' | 'waveform' | 'particles';
+export type TickCallback = (delta: number) => void;
+
+const IDLE_FRAME_MS = 50;
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -15,44 +29,127 @@ export class Renderer {
   private visualizer: BaseVisualizer | null = null;
   private currentName: VisualizerName = 'spectrum';
   private audioEngine: AudioEngine | null = null;
+  private beatDetector = new BeatDetector();
+  private postProcessing: PostProcessing | null = null;
   private animationId: number | null = null;
   private clock = new THREE.Clock();
   private sensitivity = 1.5;
+  private theme: ThemeColors = THEMES.neon;
+  private quality: QualityLevel = 'medium';
   private running = false;
+  private tickCallbacks: TickCallback[] = [];
+  private lastRenderMs = 0;
+  private reduceMotion: boolean;
+  private beatIntensity = 0;
+
+  private ambientLight!: THREE.AmbientLight;
+  private pointLight!: THREE.PointLight;
+
+  private onVisibilityChange = (): void => {
+    if (document.hidden) {
+      this.stop();
+      void this.audioEngine?.suspend();
+    } else {
+      void this.audioEngine?.resume();
+      this.start();
+    }
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+    this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
       alpha: true,
+      preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x0a0a0f, 1);
+    this.applyQualitySettings('medium');
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x0a0a0f, 0.08);
+    this.scene.fog = new THREE.FogExp2(this.theme.fog, 0.08);
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
     this.camera.position.set(0, 3, 8);
     this.camera.lookAt(0, 1, 0);
 
+    this.setupSceneLighting();
+    this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
     this.handleResize();
     window.addEventListener('resize', this.handleResize);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+  }
+
+  private applyQualitySettings(quality: QualityLevel): void {
+    const maxDpr = getMaxDpr(quality);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
+    this.renderer.setClearColor(this.theme.background, 1);
+  }
+
+  private setupSceneLighting(): void {
+    this.ambientLight = new THREE.AmbientLight(this.theme.ambient, 0.5);
+    this.pointLight = new THREE.PointLight(this.theme.pointLight, 2, 20);
+    this.pointLight.position.set(0, 5, 0);
+    this.scene.add(this.ambientLight, this.pointLight);
   }
 
   setAudioEngine(engine: AudioEngine): void {
     this.audioEngine = engine;
   }
 
-  setVisualizer(name: VisualizerName): void {
-    if (this.currentName === name && this.visualizer) return;
+  onTick(callback: TickCallback): void {
+    this.tickCallbacks.push(callback);
+  }
+
+  offTick(callback: TickCallback): void {
+    this.tickCallbacks = this.tickCallbacks.filter((cb) => cb !== callback);
+  }
+
+  getCanvas(): HTMLCanvasElement {
+    return this.canvas;
+  }
+
+  async captureScreenshot(): Promise<Blob | null> {
+    if (this.postProcessing?.isEnabled()) {
+      return this.postProcessing.captureToBlob();
+    }
+    this.renderer.render(this.scene, this.camera);
+    return new Promise((resolve) => {
+      this.canvas.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+
+  setQuality(quality: QualityLevel): void {
+    const prev = this.quality;
+    this.quality = quality;
+    this.applyQualitySettings(quality);
+    this.postProcessing?.setEnabled(shouldUseBloom(quality));
+    if (prev !== quality) {
+      this.setVisualizer(this.currentName, true);
+    }
+  }
+
+  getQuality(): QualityLevel {
+    return this.quality;
+  }
+
+  private buildVisualizerOptions() {
+    return {
+      sensitivity: this.sensitivity,
+      theme: this.theme,
+      particleCount: getParticleCount(this.quality),
+      barCount: getBarCount(this.quality),
+      segmentCount: getSegmentCount(this.quality),
+    };
+  }
+
+  setVisualizer(name: VisualizerName, forceRecreate = false): void {
+    if (!forceRecreate && this.currentName === name && this.visualizer) return;
 
     this.clearVisualizer();
     this.currentName = name;
-
-    const options = { sensitivity: this.sensitivity };
+    const options = this.buildVisualizerOptions();
 
     switch (name) {
       case 'spectrum':
@@ -73,10 +170,26 @@ export class Renderer {
 
   setSensitivity(value: number): void {
     this.sensitivity = value;
-    if (this.visualizer) {
-      this.visualizer = null;
-      this.setVisualizer(this.currentName);
-    }
+    this.visualizer?.setSensitivity(value);
+  }
+
+  setTheme(name: ThemeName): void {
+    this.theme = THEMES[name];
+    this.renderer.setClearColor(this.theme.background, 1);
+    this.scene.fog = new THREE.FogExp2(this.theme.fog, 0.08);
+    this.ambientLight.color.setHex(this.theme.ambient);
+    this.pointLight.color.setHex(this.theme.pointLight);
+    this.visualizer?.setTheme(this.theme);
+    const accentStrength = name === 'sunset' ? 1.0 : name === 'mono' ? 0.4 : 0.85;
+    this.postProcessing?.setBloomStrength(accentStrength);
+  }
+
+  getTheme(): ThemeName {
+    return this.theme.name;
+  }
+
+  getBeatIntensity(): number {
+    return this.beatIntensity;
   }
 
   start(): void {
@@ -105,18 +218,43 @@ export class Renderer {
       timeDomain: new Uint8Array(0),
     };
 
+    const isActive = this.audioEngine?.getIsPlaying() ?? false;
+
     if (this.audioEngine) {
       data = this.audioEngine.getAudioData();
     }
 
+    this.beatIntensity = this.beatDetector.update(data.frequency, delta);
+
+    let envelope = 0;
     if (this.visualizer) {
-      this.visualizer.update(data, delta);
+      envelope = this.visualizer.applyEnvelope(isActive, delta);
+      this.visualizer.update(data, delta, envelope, this.beatIntensity);
     }
 
-    this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
-    this.camera.lookAt(0, 1, 0);
+    for (const cb of this.tickCallbacks) {
+      cb(delta);
+    }
 
-    this.renderer.render(this.scene, this.camera);
+    const isIdle = !isActive && envelope < 0.05;
+    const now = performance.now();
+    if (isIdle && now - this.lastRenderMs < IDLE_FRAME_MS) {
+      return;
+    }
+    this.lastRenderMs = now;
+
+    if (!this.reduceMotion) {
+      const beatZoom = 1 + this.beatIntensity * 0.03;
+      this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
+      this.camera.position.z = 8 / beatZoom;
+      this.camera.lookAt(0, 1, 0);
+    }
+
+    if (this.postProcessing?.isEnabled()) {
+      this.postProcessing.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   };
 
   private clearVisualizer(): void {
@@ -124,14 +262,6 @@ export class Renderer {
       this.visualizer.dispose();
       this.visualizer = null;
     }
-
-    const toRemove: THREE.Object3D[] = [];
-    this.scene.traverse((obj: THREE.Object3D) => {
-      if (obj !== this.scene) {
-        toRemove.push(obj);
-      }
-    });
-    toRemove.forEach((obj) => this.scene.remove(obj));
   }
 
   private handleResize = (): void => {
@@ -140,12 +270,15 @@ export class Renderer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.postProcessing?.setSize(width, height);
   };
 
   dispose(): void {
     this.stop();
     window.removeEventListener('resize', this.handleResize);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.clearVisualizer();
+    this.postProcessing?.dispose();
     this.renderer.dispose();
   }
 }

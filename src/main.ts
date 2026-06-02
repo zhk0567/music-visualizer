@@ -1,6 +1,8 @@
 import { AudioEngine } from './audio/AudioEngine';
 import { Renderer } from './render/Renderer';
 import { Controls } from './ui/Controls';
+import { loadSettings, syncSettingsToUrl } from './utils/settings';
+import { detectQuality } from './utils/quality';
 
 function showError(message: string): void {
   const overlay = document.getElementById('error-overlay');
@@ -9,6 +11,10 @@ function showError(message: string): void {
     msg.textContent = message;
     overlay.classList.remove('hidden');
   }
+}
+
+function hideError(): void {
+  document.getElementById('error-overlay')?.classList.add('hidden');
 }
 
 function setLoading(loading: boolean): void {
@@ -31,24 +37,49 @@ function main(): void {
     return;
   }
 
+  const app = document.getElementById('app');
   const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
   const controlsRoot = document.getElementById('controls-root');
 
-  if (!canvas || !controlsRoot) {
+  if (!app || !canvas || !controlsRoot) {
     showError('页面初始化失败');
     return;
   }
 
+  document.getElementById('error-dismiss')?.addEventListener('click', hideError);
+
+  const settings = loadSettings();
+  if (!localStorage.getItem('music-visualizer-settings')) {
+    settings.quality = detectQuality();
+  }
+
   const engine = new AudioEngine();
+  engine.setLoop(settings.loop);
+  engine.setAnalyserPreset(settings.analyserPreset);
+
   const renderer = new Renderer(canvas);
   renderer.setAudioEngine(engine);
-  renderer.setVisualizer('spectrum');
+  renderer.setQuality(settings.quality);
+  renderer.setSensitivity(settings.sensitivity);
+  renderer.setTheme(settings.theme);
+  renderer.setVisualizer(settings.visualizer);
   renderer.start();
 
-  new Controls(controlsRoot, engine, renderer, {
+  const controls = new Controls(controlsRoot, app, engine, renderer, {
     onLoadingChange: setLoading,
     onError: showError,
   });
+  controls.applySettings(settings);
+  syncSettingsToUrl(settings);
+
+  const cleanup = (): void => {
+    controls.dispose();
+    renderer.dispose();
+    engine.dispose();
+  };
+
+  window.addEventListener('pagehide', cleanup);
+  window.addEventListener('beforeunload', cleanup);
 }
 
 main();

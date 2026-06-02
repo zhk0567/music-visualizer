@@ -1,25 +1,43 @@
 import * as THREE from 'three';
-import { BaseVisualizer } from './BaseVisualizer';
+import { BaseVisualizer, type VisualizerOptions } from './BaseVisualizer';
 import type { AudioData } from '../../audio/AudioEngine';
+import { hslToRgb } from '../themes';
 
-const PARTICLE_COUNT = 5000;
+const NOISE_SIZE = 256;
+
+function buildNoiseTable(size: number): Float32Array {
+  const table = new Float32Array(size * 3);
+  for (let i = 0; i < size; i++) {
+    table[i * 3] = (Math.random() - 0.5) * 2;
+    table[i * 3 + 1] = (Math.random() - 0.5) * 2;
+    table[i * 3 + 2] = (Math.random() - 0.5) * 2;
+  }
+  return table;
+}
 
 export class ParticleField extends BaseVisualizer {
   private points!: THREE.Points;
-  private velocities: Float32Array = new Float32Array(PARTICLE_COUNT * 3);
-  private basePositions: Float32Array = new Float32Array(PARTICLE_COUNT * 3);
+  private velocities: Float32Array;
+  private basePositions: Float32Array;
   private material!: THREE.PointsMaterial;
+  private particleCount: number;
+  private noiseTable: Float32Array;
+  private frameIndex = 0;
 
-  constructor(scene: THREE.Scene, options: { sensitivity?: number } = {}) {
+  constructor(scene: THREE.Scene, options: VisualizerOptions = {}) {
     super(scene, options);
+    this.particleCount = options.particleCount ?? 3500;
+    this.velocities = new Float32Array(this.particleCount * 3);
+    this.basePositions = new Float32Array(this.particleCount * 3);
+    this.noiseTable = buildNoiseTable(NOISE_SIZE);
     this.init();
   }
 
   protected init(): void {
-    const positions = new Float32Array(PARTICLE_COUNT * 3);
-    const colors = new Float32Array(PARTICLE_COUNT * 3);
+    const positions = new Float32Array(this.particleCount * 3);
+    const colors = new Float32Array(this.particleCount * 3);
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < this.particleCount; i++) {
       const i3 = i * 3;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
@@ -56,39 +74,61 @@ export class ParticleField extends BaseVisualizer {
     });
 
     this.points = new THREE.Points(geometry, this.material);
-    this.scene.add(this.points);
+    this.root.add(this.points);
   }
 
-  update(data: AudioData, delta: number): void {
+  protected onThemeChanged(): void {
+    this.refreshAllColors();
+  }
+
+  private refreshAllColors(): void {
+    const colors = this.points.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const colorArray = colors.array as Float32Array;
+    for (let i = 0; i < this.particleCount; i++) {
+      const i3 = i * 3;
+      const band = i % 3;
+      const hue = this.theme.hueStart + band * 0.12;
+      const [r, g, b] = hslToRgb(hue, this.theme.saturation || 0.8, 0.55);
+      colorArray[i3] = r;
+      colorArray[i3 + 1] = g;
+      colorArray[i3 + 2] = b;
+    }
+    colors.needsUpdate = true;
+  }
+
+  update(data: AudioData, delta: number, envelope: number, beat: number): void {
     const freq = data.frequency;
     const len = freq.length;
-    if (!len) return;
+    this.frameIndex++;
 
-    const bass = this.avgRange(freq, 0, Math.floor(len * 0.1));
-    const mid = this.avgRange(freq, Math.floor(len * 0.1), Math.floor(len * 0.5));
-    const treble = this.avgRange(freq, Math.floor(len * 0.5), len);
+    const bass = len ? this.avgRange(freq, 0, Math.floor(len * 0.1)) : 0;
+    const mid = len ? this.avgRange(freq, Math.floor(len * 0.1), Math.floor(len * 0.5)) : 0;
+    const treble = len ? this.avgRange(freq, Math.floor(len * 0.5), len) : 0;
 
     const positions = this.points.geometry.getAttribute('position') as THREE.BufferAttribute;
     const colors = this.points.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const posArray = positions.array as Float32Array;
+    const colorArray = colors.array as Float32Array;
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < this.particleCount; i++) {
       const i3 = i * 3;
       const band = i % 3;
       const energy = band === 0 ? bass : band === 1 ? mid : treble;
-      const force = (energy / 255) * this.sensitivity;
+      const force = (energy / 255) * this.sensitivity * envelope * (1 + beat * 0.2);
 
-      this.velocities[i3] += (Math.random() - 0.5) * force * 0.05;
-      this.velocities[i3 + 1] += force * 0.03;
-      this.velocities[i3 + 2] += (Math.random() - 0.5) * force * 0.05;
+      const ni = ((i + this.frameIndex) % NOISE_SIZE) * 3;
+      this.velocities[i3] += this.noiseTable[ni] * force * 0.05;
+      this.velocities[i3 + 1] += force * 0.03 + this.noiseTable[ni + 1] * force * 0.02;
+      this.velocities[i3 + 2] += this.noiseTable[ni + 2] * force * 0.05;
 
       const damp = 0.96;
       this.velocities[i3] *= damp;
       this.velocities[i3 + 1] *= damp;
       this.velocities[i3 + 2] *= damp;
 
-      let px = positions.getX(i) + this.velocities[i3];
-      let py = positions.getY(i) + this.velocities[i3 + 1];
-      let pz = positions.getZ(i) + this.velocities[i3 + 2];
+      let px = posArray[i3] + this.velocities[i3];
+      let py = posArray[i3 + 1] + this.velocities[i3 + 1];
+      let pz = posArray[i3 + 2] + this.velocities[i3 + 2];
 
       const dist = Math.sqrt(px * px + py * py + pz * pz);
       const maxDist = 6 + force * 3;
@@ -104,17 +144,21 @@ export class ParticleField extends BaseVisualizer {
       py += (this.basePositions[i3 + 1] - py) * pull;
       pz += (this.basePositions[i3 + 2] - pz) * pull;
 
-      positions.setXYZ(i, px, py, pz);
+      posArray[i3] = px;
+      posArray[i3 + 1] = py;
+      posArray[i3 + 2] = pz;
 
-      const hue = 0.55 + band * 0.12 + force * 0.2;
-      const color = new THREE.Color().setHSL(hue, 0.8, 0.5 + force * 0.3);
-      colors.setXYZ(i, color.r, color.g, color.b);
+      const hue = this.theme.hueStart + band * 0.12 + force * 0.2;
+      const [r, g, b] = hslToRgb(hue, this.theme.saturation || 0.8, 0.5 + force * 0.3);
+      colorArray[i3] = r;
+      colorArray[i3 + 1] = g;
+      colorArray[i3 + 2] = b;
     }
 
     positions.needsUpdate = true;
     colors.needsUpdate = true;
 
-    this.material.size = 0.04 + (bass / 255) * 0.08 * this.sensitivity;
+    this.material.size = 0.04 + (bass / 255) * 0.08 * this.sensitivity * envelope;
     this.points.rotation.y += delta * 0.1;
   }
 
@@ -130,6 +174,6 @@ export class ParticleField extends BaseVisualizer {
   dispose(): void {
     this.points.geometry.dispose();
     this.material.dispose();
-    this.scene.remove(this.points);
+    this.scene.remove(this.root);
   }
 }

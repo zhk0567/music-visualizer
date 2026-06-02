@@ -1,94 +1,126 @@
 import * as THREE from 'three';
-import { BaseVisualizer } from './BaseVisualizer';
+import { BaseVisualizer, type VisualizerOptions } from './BaseVisualizer';
 import type { AudioData } from '../../audio/AudioEngine';
-
-const BAR_COUNT = 128;
+import { hslToRgb } from '../themes';
 
 export class SpectrumBars extends BaseVisualizer {
   private mesh!: THREE.InstancedMesh;
+  private material!: THREE.MeshStandardMaterial;
   private dummy = new THREE.Object3D();
-  private heights: Float32Array = new Float32Array(BAR_COUNT);
-  private colors: Float32Array = new Float32Array(BAR_COUNT * 3);
+  private barCount: number;
+  private heights!: Float32Array;
+  private colors!: Float32Array;
 
-  constructor(scene: THREE.Scene, options: { sensitivity?: number } = {}) {
+  constructor(scene: THREE.Scene, options: VisualizerOptions = {}) {
     super(scene, options);
+    this.barCount = options.barCount ?? 128;
+    this.heights = new Float32Array(this.barCount);
+    this.colors = new Float32Array(this.barCount * 3);
     this.init();
   }
 
   protected init(): void {
     const geometry = new THREE.BoxGeometry(0.08, 1, 0.08);
-    const material = new THREE.MeshStandardMaterial({
+    this.material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: 0x222244,
+      emissive: new THREE.Color(this.theme.accent),
       emissiveIntensity: 0.5,
       metalness: 0.3,
       roughness: 0.4,
+      vertexColors: true,
     });
 
-    this.mesh = new THREE.InstancedMesh(geometry, material, BAR_COUNT);
+    this.material.onBeforeCompile = (shader) => {
+      shader.uniforms.uBeat = { value: 0 };
+      shader.uniforms.uEnvelope = { value: 1 };
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        totalEmissiveRadiance += vColor.rgb * uBeat * 0.6 * uEnvelope;`,
+      );
+      this.material.userData.shader = shader;
+    };
+
+    this.mesh = new THREE.InstancedMesh(geometry, this.material, this.barCount);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.instanceColor = new THREE.InstancedBufferAttribute(this.colors, 3);
-    material.vertexColors = true;
 
-    const radius = 3;
-    for (let i = 0; i < BAR_COUNT; i++) {
-      const angle = (i / BAR_COUNT) * Math.PI * 2;
-      this.dummy.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-      this.dummy.lookAt(0, 0, 0);
-      this.dummy.scale.set(1, 0.01, 1);
-      this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
-
-      const hue = i / BAR_COUNT;
-      const color = new THREE.Color().setHSL(hue * 0.7 + 0.55, 0.9, 0.55);
-      this.colors[i * 3] = color.r;
-      this.colors[i * 3 + 1] = color.g;
-      this.colors[i * 3 + 2] = color.b;
-    }
-
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor!.needsUpdate = true;
-    this.scene.add(this.mesh);
-
-    const ambient = new THREE.AmbientLight(0x404060, 0.5);
-    const point = new THREE.PointLight(0x648cff, 2, 20);
-    point.position.set(0, 5, 0);
-    this.scene.add(ambient, point);
+    this.refreshThemeColors();
+    this.layoutBars(1, 0);
+    this.root.add(this.mesh);
   }
 
-  update(data: AudioData, _delta: number): void {
-    const freq = data.frequency;
-    if (!freq.length) return;
-    const step = Math.floor(freq.length / BAR_COUNT);
+  private refreshThemeColors(): void {
+    for (let i = 0; i < this.barCount; i++) {
+      const t = i / this.barCount;
+      const [r, g, b] = hslToRgb(
+        this.theme.hueStart + t * this.theme.hueRange,
+        this.theme.saturation,
+        0.55,
+      );
+      this.colors[i * 3] = r;
+      this.colors[i * 3 + 1] = g;
+      this.colors[i * 3 + 2] = b;
+    }
+    if (this.mesh?.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
 
-    for (let i = 0; i < BAR_COUNT; i++) {
-      const value = freq[i * step] / 255;
-      const target = 0.05 + value * this.sensitivity * 3;
-      this.heights[i] += (target - this.heights[i]) * 0.25;
-
-      const angle = (i / BAR_COUNT) * Math.PI * 2;
-      const radius = 3;
-      this.dummy.position.set(Math.cos(angle) * radius, this.heights[i] / 2, Math.sin(angle) * radius);
-      this.dummy.lookAt(0, this.heights[i] / 2, 0);
-      this.dummy.scale.set(1, Math.max(0.01, this.heights[i]), 1);
+  private layoutBars(envelope: number, beat: number): void {
+    const radius = 3;
+    for (let i = 0; i < this.barCount; i++) {
+      const angle = (i / this.barCount) * Math.PI * 2;
+      const h = this.heights[i];
+      this.dummy.position.set(Math.cos(angle) * radius, h / 2, Math.sin(angle) * radius);
+      this.dummy.lookAt(0, h / 2, 0);
+      this.dummy.scale.set(1, Math.max(0.01, h), 1);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
 
-      const intensity = Math.min(1, value * this.sensitivity);
-      const hue = (i / BAR_COUNT) * 0.7 + 0.55;
-      const color = new THREE.Color().setHSL(hue, 0.9, 0.4 + intensity * 0.3);
-      this.colors[i * 3] = color.r;
-      this.colors[i * 3 + 1] = color.g;
-      this.colors[i * 3 + 2] = color.b;
+      const intensity = Math.min(1, (h / 3) * envelope);
+      const t = i / this.barCount;
+      const [r, g, b] = hslToRgb(
+        this.theme.hueStart + t * this.theme.hueRange,
+        this.theme.saturation,
+        0.4 + intensity * 0.3 + beat * 0.15,
+      );
+      this.colors[i * 3] = r;
+      this.colors[i * 3 + 1] = g;
+      this.colors[i * 3 + 2] = b;
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  protected onThemeChanged(): void {
+    this.material.emissive.setHex(this.theme.accent);
+    this.refreshThemeColors();
+  }
+
+  update(data: AudioData, _delta: number, envelope: number, beat: number): void {
+    const freq = data.frequency;
+    const step = freq.length ? Math.max(1, Math.floor(freq.length / this.barCount)) : 1;
+
+    for (let i = 0; i < this.barCount; i++) {
+      const raw = freq.length ? freq[i * step] / 255 : 0;
+      const value = raw * envelope;
+      const target = 0.05 + value * this.sensitivity * 3 * (1 + beat * 0.3);
+      this.heights[i] += (target - this.heights[i]) * 0.25;
+      if (!freq.length) this.heights[i] *= 0.92;
     }
 
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor!.needsUpdate = true;
+    this.layoutBars(envelope, beat);
+    this.material.emissiveIntensity = 0.4 + envelope * 0.4 + beat * 0.6;
+
+    const shader = this.material.userData.shader as { uniforms: Record<string, { value: number }> } | undefined;
+    if (shader?.uniforms) {
+      shader.uniforms.uBeat.value = beat;
+      shader.uniforms.uEnvelope.value = envelope;
+    }
   }
 
   dispose(): void {
     this.mesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.scene.remove(this.mesh);
+    this.material.dispose();
+    this.scene.remove(this.root);
   }
 }
