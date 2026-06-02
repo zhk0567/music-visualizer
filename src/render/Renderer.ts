@@ -240,6 +240,19 @@ export class Renderer {
     return this.beatIntensity;
   }
 
+  setBeatSensitivity(value: number): void {
+    this.beatDetector.setSensitivity(value);
+  }
+
+  getBeatSensitivity(): number {
+    return this.beatDetector.getSensitivity();
+  }
+
+  /** Render one frame before capture (screenshot / recording). */
+  renderFrameForCapture(): void {
+    this.renderScene();
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -316,9 +329,16 @@ export class Renderer {
 
   private renderScene(): void {
     if (!this.reduceMotion) {
-      const beatZoom = 1 + this.beatIntensity * 0.03;
-      this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
-      this.camera.position.z = 8 / beatZoom;
+      if (this.currentName === 'spectrum') {
+        this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.35;
+        this.camera.position.y = 3;
+        this.camera.position.z = 8;
+      } else {
+        const beatZoom = 1 + this.beatIntensity * 0.03;
+        this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
+        this.camera.position.y = 3;
+        this.camera.position.z = 8 / beatZoom;
+      }
       this.camera.lookAt(0, 1, 0);
     }
 

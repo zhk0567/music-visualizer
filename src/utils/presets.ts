@@ -1,6 +1,7 @@
 import type { VisualizerName } from '../render/Renderer';
 import type { ThemeName } from '../render/themes';
 import type { QualityLevel } from './quality';
+import type { AnalyserPreset } from './settings';
 import { normalizeSettings, type AppSettings } from './settings';
 
 export interface NamedPreset {
@@ -9,6 +10,8 @@ export interface NamedPreset {
   theme: ThemeName;
   quality: QualityLevel;
   sensitivity: number;
+  loop?: boolean;
+  analyserPreset?: AnalyserPreset;
 }
 
 const STORAGE_KEY = 'music-visualizer-presets';
@@ -27,12 +30,18 @@ export function loadPresets(): NamedPreset[] {
       })
       .map((item) => {
         const normalized = normalizeSettings(item);
+        const record = item as unknown as Record<string, unknown>;
         return {
           name: item.name,
           visualizer: normalized.visualizer,
           theme: normalized.theme,
           quality: normalized.quality,
           sensitivity: normalized.sensitivity,
+          loop: typeof record.loop === 'boolean' ? record.loop : normalized.loop,
+          analyserPreset:
+            typeof record.analyserPreset === 'string'
+              ? normalized.analyserPreset
+              : normalized.analyserPreset,
         };
       });
   } catch {
@@ -52,6 +61,8 @@ export function addPreset(name: string, settings: AppSettings): NamedPreset[] {
     theme: settings.theme,
     quality: settings.quality,
     sensitivity: settings.sensitivity,
+    loop: settings.loop,
+    analyserPreset: settings.analyserPreset,
   });
   savePresets(presets);
   return presets;

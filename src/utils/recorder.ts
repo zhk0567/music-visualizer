@@ -30,9 +30,14 @@ export class CanvasRecorder {
         return;
       }
       this.recorder.onstop = () => {
-        resolve(new Blob(this.chunks, { type: 'video/webm' }));
+        const blob = new Blob(this.chunks, { type: 'video/webm' });
         this.recorder = null;
         this.chunks = [];
+        if (blob.size < 100) {
+          reject(new Error('录制内容为空，请确认可视化正在播放后重试'));
+          return;
+        }
+        resolve(blob);
       };
       this.recorder.onerror = () => reject(new Error('录制失败'));
       this.recorder.stop();
