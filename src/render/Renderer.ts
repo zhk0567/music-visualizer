@@ -59,10 +59,9 @@ export class Renderer {
     this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     this.renderer = this.createWebGLRenderer('medium');
-    this.applyQualitySettings('medium');
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(this.theme.fog, 0.08);
+    this.applyQualitySettings('medium');
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
     this.camera.position.set(0, 3, 8);
@@ -84,10 +83,20 @@ export class Renderer {
     });
   }
 
+  private applySceneAtmosphere(_quality: QualityLevel): void {
+    const fogDensity = this.currentName === 'spectrum' ? 0.028 : 0.06;
+    this.scene.fog = new THREE.FogExp2(this.theme.fog, fogDensity);
+    this.renderer.setClearColor(this.theme.background, 1);
+  }
+
   private applyQualitySettings(quality: QualityLevel): void {
     const maxDpr = getMaxDpr(quality);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
-    this.renderer.setClearColor(this.theme.background, 1);
+    if (this.scene) {
+      this.applySceneAtmosphere(quality);
+    } else {
+      this.renderer.setClearColor(this.theme.background, 1);
+    }
   }
 
   private async ensurePostProcessing(): Promise<PostProcessing> {
@@ -96,7 +105,18 @@ export class Renderer {
       this.postProcessingPromise = import('./PostProcessing').then(({ PostProcessing }) => {
         const pp = new PostProcessing(this.renderer, this.scene, this.camera);
         pp.setEnabled(shouldUseBloom(this.quality));
-        const accentStrength = this.theme.name === 'sunset' ? 1.0 : this.theme.name === 'mono' ? 0.4 : 0.85;
+        const accentStrength =
+          this.currentName === 'spectrum'
+            ? this.theme.name === 'sunset'
+              ? 1.15
+              : this.theme.name === 'mono'
+                ? 0.65
+                : 1.05
+            : this.theme.name === 'sunset'
+              ? 1.0
+              : this.theme.name === 'mono'
+                ? 0.4
+                : 0.85;
         pp.setBloomStrength(accentStrength);
         this.postProcessing = pp;
         return pp;
@@ -208,6 +228,7 @@ export class Renderer {
         break;
       }
     }
+    this.applySceneAtmosphere(this.quality);
     this.wakeUp();
   }
 
@@ -222,12 +243,22 @@ export class Renderer {
 
   setTheme(name: ThemeName): void {
     this.theme = THEMES[name];
-    this.renderer.setClearColor(this.theme.background, 1);
-    this.scene.fog = new THREE.FogExp2(this.theme.fog, 0.08);
+    this.applySceneAtmosphere(this.quality);
     this.ambientLight.color.setHex(this.theme.ambient);
     this.pointLight.color.setHex(this.theme.pointLight);
     this.visualizer?.setTheme(this.theme);
-    const accentStrength = name === 'sunset' ? 1.0 : name === 'mono' ? 0.4 : 0.85;
+    const accentStrength =
+      this.currentName === 'spectrum'
+        ? name === 'sunset'
+          ? 1.15
+          : name === 'mono'
+            ? 0.65
+            : 1.05
+        : name === 'sunset'
+          ? 1.0
+          : name === 'mono'
+            ? 0.4
+            : 0.85;
     void this.ensurePostProcessing().then((pp) => pp.setBloomStrength(accentStrength));
     this.wakeUp();
   }
