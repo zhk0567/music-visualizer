@@ -73,6 +73,8 @@ export class Controls {
   private unsubscribePlayback: (() => void) | null = null;
   private helpOverlay: HTMLElement | null;
   private helpDismissBtn: HTMLButtonElement | null;
+  private helpBtn: HTMLButtonElement;
+  private moreDetails: HTMLDetailsElement;
   private recorder = new CanvasRecorder();
   private presets: NamedPreset[] = [];
 
@@ -119,11 +121,16 @@ export class Controls {
     this.playBtn.setAttribute('aria-label', '播放或暂停');
     this.playBtn.addEventListener('click', () => void this.togglePlay());
 
-    const changeBtn = this.createButton('更换', () => this.changeAudio());
     const fullscreenBtn = this.createButton('全屏', () => this.toggleFullscreen());
     const screenshotBtn = this.createButton('截图', () => this.takeScreenshot());
     this.recordBtn = this.createButton('录制', () => void this.toggleRecording());
     this.copyLinkBtn = this.createButton('复制链接', () => this.copyShareLink());
+    const changeBtn = this.createButton('更换', () => this.changeAudio());
+    changeBtn.classList.add('btn-ghost');
+
+    this.helpBtn = this.createButton('?', () => this.toggleHelp());
+    this.helpBtn.classList.add('btn-icon');
+    this.helpBtn.setAttribute('aria-label', '快捷键帮助');
 
     this.progressBar = document.createElement('input');
     this.progressBar.type = 'range';
@@ -193,62 +200,83 @@ export class Controls {
     this.presetSaveBtn = this.createButton('保存预设', () => this.saveCurrentPreset());
     this.presetDeleteBtn = this.createButton('删除预设', () => this.removeSelectedPreset());
 
-    const row0 = document.createElement('div');
-    row0.className = 'controls-row center';
-    row0.appendChild(this.sourceLabel);
+    const header = document.createElement('div');
+    header.className = 'controls-header';
+    header.append(this.sourceLabel, changeBtn, this.helpBtn);
 
-    const row1 = document.createElement('div');
-    row1.className = 'controls-row center';
-    row1.append(this.fileBtn, this.micBtn, this.playBtn, this.loopBtn, this.muteBtn, changeBtn);
+    const transportActions = document.createElement('div');
+    transportActions.className = 'transport-actions';
+    transportActions.append(this.fileBtn, this.micBtn, this.playBtn, this.loopBtn, this.muteBtn);
 
-    const row1b = document.createElement('div');
-    row1b.className = 'controls-row center';
-    row1b.append(fullscreenBtn, screenshotBtn, this.recordBtn, this.copyLinkBtn, this.qualitySelect, this.analyserBtn);
+    const transportProgress = document.createElement('div');
+    transportProgress.className = 'transport-progress';
+    transportProgress.append(this.progressBar, this.timeDisplay);
 
-    const rowPreset = document.createElement('div');
-    rowPreset.className = 'controls-row center';
-    rowPreset.append(this.presetSelect, this.presetSaveBtn, this.presetDeleteBtn);
+    const transport = document.createElement('div');
+    transport.className = 'controls-transport';
+    transport.append(transportActions, transportProgress);
 
-    const row2 = document.createElement('div');
-    row2.className = 'controls-row';
-    row2.append(this.timeDisplay, this.progressBar);
-
-    const row3 = document.createElement('div');
-    row3.className = 'controls-row';
-    row3.append(
-      this.createSliderGroup('音量', this.volumeSlider),
-      this.createSliderGroup('灵敏度', this.sensitivitySlider),
-    );
-
-    const row4 = document.createElement('div');
-    row4.className = 'controls-row center';
-    const modeTabs = document.createElement('div');
-    modeTabs.className = 'mode-tabs';
+    const modeGroup = document.createElement('div');
+    modeGroup.className = 'segment-group';
+    modeGroup.setAttribute('role', 'group');
+    modeGroup.setAttribute('aria-label', '可视化模式');
     for (const mode of [
       { name: 'spectrum' as const, label: '频谱' },
       { name: 'waveform' as const, label: '波形' },
       { name: 'particles' as const, label: '粒子' },
     ]) {
       const btn = this.createButton(mode.label, () => void this.setMode(mode.name));
+      btn.classList.add('segment-btn');
       btn.setAttribute('aria-pressed', 'false');
       this.modeButtons.set(mode.name, btn);
-      modeTabs.appendChild(btn);
+      modeGroup.appendChild(btn);
     }
-    row4.appendChild(modeTabs);
 
-    const row5 = document.createElement('div');
-    row5.className = 'controls-row center';
-    const themeTabs = document.createElement('div');
-    themeTabs.className = 'mode-tabs';
+    const themeGroup = document.createElement('div');
+    themeGroup.className = 'segment-group';
+    themeGroup.setAttribute('role', 'group');
+    themeGroup.setAttribute('aria-label', '主题');
     for (const themeName of THEME_LIST) {
       const btn = this.createButton(THEMES[themeName].label, () => this.setTheme(themeName));
+      btn.classList.add('segment-btn');
       btn.setAttribute('aria-pressed', 'false');
       this.themeButtons.set(themeName, btn);
-      themeTabs.appendChild(btn);
+      themeGroup.appendChild(btn);
     }
-    row5.appendChild(themeTabs);
 
-    this.panel.append(row0, row1, row1b, rowPreset, row2, row3, row4, row5);
+    const visual = document.createElement('div');
+    visual.className = 'controls-visual';
+    visual.append(modeGroup, themeGroup);
+
+    this.moreDetails = document.createElement('details');
+    this.moreDetails.className = 'controls-more';
+    const moreSummary = document.createElement('summary');
+    moreSummary.textContent = '更多设置';
+    const moreBody = document.createElement('div');
+    moreBody.className = 'controls-more-body';
+    moreBody.append(
+      this.createSliderGroup('音量', this.volumeSlider),
+      this.createSliderGroup('灵敏度', this.sensitivitySlider),
+      this.qualitySelect,
+      this.analyserBtn,
+      screenshotBtn,
+      this.recordBtn,
+      fullscreenBtn,
+      this.copyLinkBtn,
+      this.presetSelect,
+      this.presetSaveBtn,
+      this.presetDeleteBtn,
+    );
+    this.moreDetails.append(moreSummary, moreBody);
+    this.moreDetails.addEventListener('toggle', () => {
+      if (this.moreDetails.open) {
+        if (this.hideTimer !== null) clearTimeout(this.hideTimer);
+      } else {
+        this.resetHideTimer();
+      }
+    });
+
+    this.panel.append(header, transport, visual, this.moreDetails);
     this.root.append(this.fileInput, this.panel);
 
     this.fileInput.addEventListener('change', () => void this.handleFileSelect());
@@ -733,6 +761,7 @@ export class Controls {
   private resetHideTimer(): void {
     if (this.hideTimer !== null) clearTimeout(this.hideTimer);
     if (window.matchMedia('(pointer: coarse)').matches) return;
+    if (this.moreDetails.open) return;
     this.hideTimer = window.setTimeout(() => {
       this.panel.classList.add('controls-hidden');
     }, 3000);

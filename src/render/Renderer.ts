@@ -40,7 +40,6 @@ export class Renderer {
   private tickCallbacks: TickCallback[] = [];
   private reduceMotion: boolean;
   private beatIntensity = 0;
-  private forceFullSpeed = false;
 
   private ambientLight!: THREE.AmbientLight;
   private pointLight!: THREE.PointLight;
@@ -134,7 +133,7 @@ export class Renderer {
   }
 
   wakeUp(): void {
-    this.forceFullSpeed = true;
+    // visualizer updates every frame; kept for Controls after load/seek
   }
 
   async captureScreenshot(): Promise<Blob | null> {
@@ -287,30 +286,31 @@ export class Renderer {
     }
 
     let envelope = 0;
-    const shouldRunVisual = isActive || this.forceFullSpeed;
+    const hasSource = this.audioEngine?.hasAudioSource() ?? false;
 
     const motionScale = this.reduceMotion ? 0.35 : 1;
 
-    if (shouldRunVisual) {
-      this.beatIntensity = this.beatDetector.update(data.frequency, delta);
-      if (this.visualizer) {
-        envelope = this.visualizer.applyEnvelope(isActive, delta, motionScale);
-        this.visualizer.update(data, delta, envelope, this.beatIntensity);
-      }
+    if (this.visualizer) {
+      this.beatIntensity =
+        isActive || hasSource
+          ? this.beatDetector.update(data.frequency, delta)
+          : this.beatIntensity * 0.92;
+
+      envelope = this.visualizer.applyEnvelope(isActive || hasSource, delta, motionScale);
+      const displayEnvelope =
+        !isActive && !hasSource ? 1 : Math.max(envelope, 0.5);
+
+      this.visualizer.update(data, delta, displayEnvelope, this.beatIntensity);
+    }
+
+    if (isActive || hasSource) {
       for (const cb of this.tickCallbacks) {
         cb(delta);
       }
-    } else if (this.visualizer) {
-      envelope = this.visualizer.applyEnvelope(false, delta, motionScale);
     }
 
-    this.forceFullSpeed = false;
-
-    const isIdle = !isActive && envelope < 0.05;
-    if (!isIdle) {
-      this.renderScene();
-    }
-
+    const isIdle = !isActive && !hasSource;
+    this.renderScene();
     this.scheduleNextFrame(isIdle);
   };
 

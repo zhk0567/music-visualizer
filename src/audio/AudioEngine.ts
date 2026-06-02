@@ -105,6 +105,10 @@ export class AudioEngine {
     return this.micPaused;
   }
 
+  hasAudioSource(): boolean {
+    return this.sourceType === 'mic' ? !!this.mediaStream : !!this.audioBuffer;
+  }
+
   getDuration(): number {
     return this.duration;
   }
