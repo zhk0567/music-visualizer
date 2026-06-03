@@ -28,6 +28,10 @@ describe('normalizeSettings', () => {
     expect(s.sensitivity).toBe(3);
   });
 
+  it('accepts polar visualizer', () => {
+    expect(normalizeSettings({ visualizer: 'polar' }).visualizer).toBe('polar');
+  });
+
   it('accepts valid partial settings', () => {
     const s = normalizeSettings({
       visualizer: 'waveform',

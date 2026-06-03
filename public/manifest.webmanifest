@@ -1,11 +1,11 @@
 {
   "name": "音乐可视化",
   "short_name": "Visualizer",
-  "description": "浏览器端音乐可视化 — 频谱、波形、粒子",
+  "description": "浏览器端音乐可视化 — 频谱、波形、粒子、圆盘",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#0a0a0f",
+  "background_color": "#12122a",
+  "theme_color": "#12122a",
   "icons": [
     {
       "src": "/favicon.svg",

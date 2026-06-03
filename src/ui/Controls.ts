@@ -1,5 +1,6 @@
 import type { AudioEngine } from '../audio/AudioEngine';
-import type { Renderer, VisualizerName } from '../render/Renderer';
+import type { Renderer } from '../render/Renderer';
+import type { VisualizerName } from '../render/modeProfiles';
 import type { ThemeName } from '../render/themes';
 import { THEMES, THEME_LIST } from '../render/themes';
 import type { AnalyserPreset, AppSettings } from '../utils/settings';
@@ -243,6 +244,7 @@ export class Controls {
       { name: 'spectrum' as const, label: '频谱' },
       { name: 'waveform' as const, label: '波形' },
       { name: 'particles' as const, label: '粒子' },
+      { name: 'polar' as const, label: '圆盘' },
     ]) {
       const btn = this.createButton(mode.label, () => void this.setMode(mode.name));
       btn.classList.add('segment-btn');
@@ -756,13 +758,14 @@ export class Controls {
         void this.setMode('particles');
         break;
       case 'Digit4':
-        this.setTheme('neon');
+        if (e.shiftKey) this.setTheme('neon');
+        else void this.setMode('polar');
         break;
       case 'Digit5':
-        this.setTheme('sunset');
+        if (e.shiftKey) this.setTheme('sunset');
         break;
       case 'Digit6':
-        this.setTheme('mono');
+        if (e.shiftKey) this.setTheme('mono');
         break;
       case 'KeyF':
         this.toggleFullscreen();

@@ -1,4 +1,4 @@
-import type { VisualizerName } from '../render/Renderer';
+import type { VisualizerName } from '../render/modeProfiles';
 import type { ThemeName } from '../render/themes';
 import type { QualityLevel } from './quality';
 import type { AnalyserPreset } from './settings';

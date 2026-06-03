@@ -13,8 +13,9 @@ import {
   shouldUseAntialias,
   type QualityLevel,
 } from '../utils/quality';
+import { getBloomStrength, getFogDensity, MODE_PROFILES, type VisualizerName } from './modeProfiles';
 
-export type VisualizerName = 'spectrum' | 'waveform' | 'particles';
+export type { VisualizerName };
 export type TickCallback = (delta: number) => void;
 
 const IDLE_FRAME_MS = 50;
@@ -84,9 +85,13 @@ export class Renderer {
   }
 
   private applySceneAtmosphere(_quality: QualityLevel): void {
-    const fogDensity = this.currentName === 'spectrum' ? 0.028 : 0.06;
-    this.scene.fog = new THREE.FogExp2(this.theme.fog, fogDensity);
+    this.scene.fog = new THREE.FogExp2(this.theme.fog, getFogDensity(this.currentName));
     this.renderer.setClearColor(this.theme.background, 1);
+  }
+
+  private syncPostProcessingForMode(): void {
+    const strength = getBloomStrength(this.currentName, this.theme.name);
+    void this.ensurePostProcessing().then((pp) => pp.setBloomStrength(strength));
   }
 
   private applyQualitySettings(quality: QualityLevel): void {
@@ -105,19 +110,7 @@ export class Renderer {
       this.postProcessingPromise = import('./PostProcessing').then(({ PostProcessing }) => {
         const pp = new PostProcessing(this.renderer, this.scene, this.camera);
         pp.setEnabled(shouldUseBloom(this.quality));
-        const accentStrength =
-          this.currentName === 'spectrum'
-            ? this.theme.name === 'sunset'
-              ? 1.15
-              : this.theme.name === 'mono'
-                ? 0.65
-                : 1.05
-            : this.theme.name === 'sunset'
-              ? 1.0
-              : this.theme.name === 'mono'
-                ? 0.4
-                : 0.85;
-        pp.setBloomStrength(accentStrength);
+        pp.setBloomStrength(getBloomStrength(this.currentName, this.theme.name));
         this.postProcessing = pp;
         return pp;
       });
@@ -227,8 +220,14 @@ export class Renderer {
         this.visualizer = new ParticleField(this.scene, options);
         break;
       }
+      case 'polar': {
+        const { PolarSpectrum } = await import('./visualizers/PolarSpectrum');
+        this.visualizer = new PolarSpectrum(this.scene, options);
+        break;
+      }
     }
     this.applySceneAtmosphere(this.quality);
+    this.syncPostProcessingForMode();
     this.wakeUp();
   }
 
@@ -247,19 +246,7 @@ export class Renderer {
     this.ambientLight.color.setHex(this.theme.ambient);
     this.pointLight.color.setHex(this.theme.pointLight);
     this.visualizer?.setTheme(this.theme);
-    const accentStrength =
-      this.currentName === 'spectrum'
-        ? name === 'sunset'
-          ? 1.15
-          : name === 'mono'
-            ? 0.65
-            : 1.05
-        : name === 'sunset'
-          ? 1.0
-          : name === 'mono'
-            ? 0.4
-            : 0.85;
-    void this.ensurePostProcessing().then((pp) => pp.setBloomStrength(accentStrength));
+    this.syncPostProcessingForMode();
     this.wakeUp();
   }
 
@@ -360,17 +347,20 @@ export class Renderer {
 
   private renderScene(): void {
     if (!this.reduceMotion) {
-      if (this.currentName === 'spectrum') {
-        this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.35;
-        this.camera.position.y = 3;
-        this.camera.position.z = 8;
+      const profile = MODE_PROFILES[this.currentName].camera;
+      const t = Date.now() * 0.0002;
+      const beatZoom = 1 + this.beatIntensity * profile.beatZoom;
+
+      if (profile.topDown) {
+        this.camera.position.x = Math.sin(t) * profile.sway;
+        this.camera.position.y = profile.baseY / beatZoom;
+        this.camera.position.z = profile.baseZ + Math.cos(t) * profile.sway * 0.5;
       } else {
-        const beatZoom = 1 + this.beatIntensity * 0.03;
-        this.camera.position.x = Math.sin(Date.now() * 0.0002) * 0.5;
-        this.camera.position.y = 3;
-        this.camera.position.z = 8 / beatZoom;
+        this.camera.position.x = Math.sin(t) * profile.sway;
+        this.camera.position.y = profile.baseY;
+        this.camera.position.z = profile.baseZ / beatZoom;
       }
-      this.camera.lookAt(0, 1, 0);
+      this.camera.lookAt(profile.lookX, profile.lookY, profile.lookZ);
     }
 
     if (this.postProcessing?.isEnabled()) {

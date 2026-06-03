@@ -1,4 +1,4 @@
-import type { VisualizerName } from '../render/Renderer';
+import type { VisualizerName } from '../render/modeProfiles';
 import type { ThemeName } from '../render/themes';
 import { THEME_LIST } from '../render/themes';
 import type { QualityLevel } from './quality';
@@ -18,7 +18,7 @@ export interface AppSettings {
 
 const STORAGE_KEY = 'music-visualizer-settings';
 
-const VISUALIZERS: VisualizerName[] = ['spectrum', 'waveform', 'particles'];
+const VISUALIZERS: VisualizerName[] = ['spectrum', 'waveform', 'particles', 'polar'];
 const PRESETS: AnalyserPreset[] = ['responsive', 'smooth'];
 const QUALITIES: QualityLevel[] = ['low', 'medium', 'high'];
 

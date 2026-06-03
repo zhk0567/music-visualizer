@@ -26,9 +26,9 @@ export default defineConfig({
       manifest: {
         name: '音乐可视化',
         short_name: 'Visualizer',
-        description: '浏览器端音乐可视化 — 频谱、波形、粒子',
-        theme_color: '#0a0a0f',
-        background_color: '#0a0a0f',
+        description: '浏览器端音乐可视化 — 频谱、波形、粒子、圆盘',
+        theme_color: '#12122a',
+        background_color: '#12122a',
         display: 'standalone',
         icons: [
           {
