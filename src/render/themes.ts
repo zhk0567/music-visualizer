@@ -6,49 +6,62 @@ export interface ThemeColors {
   accent: number;
   ambient: number;
   pointLight: number;
+  skyLight: number;
+  groundLight: number;
   fog: number;
   hueStart: number;
   hueRange: number;
   saturation: number;
   background: number;
+  /** 渐变背景顶色（比 background 更亮） */
+  skyGradient: number;
 }
 
 export const THEMES: Record<ThemeName, ThemeColors> = {
   neon: {
     name: 'neon',
     label: '霓虹',
-    accent: 0x7aa8ff,
-    ambient: 0x404060,
-    pointLight: 0x648cff,
-    fog: 0x1a1a38,
-    hueStart: 0.52,
-    hueRange: 0.75,
-    saturation: 0.95,
-    background: 0x12122a,
+    accent: 0xa8d4ff,
+    ambient: 0x9090c8,
+    pointLight: 0xc8e0ff,
+    skyLight: 0xb8d0ff,
+    groundLight: 0x6868b0,
+    fog: 0x5858a8,
+    hueStart: 0.5,
+    hueRange: 0.78,
+    saturation: 0.88,
+    background: 0x5858a8,
+    skyGradient: 0x8898e8,
   },
   sunset: {
     name: 'sunset',
     label: '日落',
-    accent: 0xff7a45,
-    ambient: 0x402020,
-    pointLight: 0xff8844,
-    fog: 0x2a1410,
-    hueStart: 0.02,
-    hueRange: 0.14,
-    saturation: 0.9,
-    background: 0x1a0c08,
+    accent: 0xffb080,
+    ambient: 0xc08060,
+    pointLight: 0xffcc99,
+    skyLight: 0xffaa88,
+    groundLight: 0xa05840,
+    fog: 0x905040,
+    hueStart: 0.04,
+    hueRange: 0.12,
+    saturation: 0.85,
+    background: 0x905040,
+    skyGradient: 0xd87858,
   },
   mono: {
     name: 'mono',
     label: '极简',
-    accent: 0xe8e8ff,
-    ambient: 0x303030,
+    accent: 0xf8f8ff,
+    ambient: 0x9898b8,
     pointLight: 0xffffff,
-    fog: 0x1a1a22,
+    skyLight: 0xc8c8e0,
+    groundLight: 0x787890,
+    fog: 0x686880,
     hueStart: 0.58,
-    hueRange: 0.2,
+    hueRange: 0.18,
     saturation: 0.35,
-    background: 0x101018,
+    background: 0x686880,
+    skyGradient: 0x9898b0,
   },
 };
 

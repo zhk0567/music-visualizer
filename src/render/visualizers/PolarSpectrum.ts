@@ -2,25 +2,32 @@ import * as THREE from 'three';
 import { BaseVisualizer, type VisualizerOptions } from './BaseVisualizer';
 import type { AudioData } from '../../audio/AudioEngine';
 import { hslToRgb } from '../themes';
+import { getMotionProfile, smoothToward } from '../modeProfiles';
 import { freqIndexForBar } from './freqMapping';
+import {
+  createAccentGlowMaterial,
+  createAccentSolidMaterial,
+  createBarBodyMaterial,
+  createBarCapMaterial,
+} from './visualMaterials';
 
-const MIN_BAR_SCALE = 0.15;
-const INNER_RADIUS = 0.6;
-const MAX_BAR_LENGTH = 3.2;
+const MIN_BAR_SCALE = 0.2;
+const INNER_RADIUS = 0.5;
+const motion = getMotionProfile('polar');
 
 export class PolarSpectrum extends BaseVisualizer {
   private mesh!: THREE.InstancedMesh;
   private capMesh!: THREE.InstancedMesh;
-  private material!: THREE.MeshBasicMaterial;
-  private capMaterial!: THREE.MeshBasicMaterial;
-  private baseRing!: THREE.Mesh;
-  private innerGlow!: THREE.Mesh;
-  private floorGlow!: THREE.Mesh;
+  private material!: THREE.MeshPhongMaterial;
+  private capMaterial!: THREE.MeshPhongMaterial;
+  private centerHub!: THREE.Mesh;
+  private rippleRing!: THREE.Mesh;
   private dummy = new THREE.Object3D();
   private colorHelper = new THREE.Color();
   private accentColor = new THREE.Color();
   private barCount: number;
   private lengths!: Float32Array;
+  private targets!: Float32Array;
   private baseColors!: Float32Array;
   private idlePhase = 0;
 
@@ -28,110 +35,77 @@ export class PolarSpectrum extends BaseVisualizer {
     super(scene, options);
     this.barCount = options.barCount ?? 128;
     this.lengths = new Float32Array(this.barCount);
+    this.targets = new Float32Array(this.barCount);
     this.baseColors = new Float32Array(this.barCount * 3);
     this.accentColor.setHex(this.theme.accent);
     this.init();
   }
 
   protected init(): void {
-    const geometry = new THREE.BoxGeometry(1, 0.1, 0.1);
-    this.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      vertexColors: true,
-      fog: false,
-      toneMapped: false,
-      transparent: true,
-      opacity: 0.88,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    const geometry = new THREE.BoxGeometry(1, 0.24, 0.18);
+    this.material = createBarBodyMaterial();
 
     this.mesh = new THREE.InstancedMesh(geometry, this.material, this.barCount);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 2;
 
-    const capGeo = new THREE.BoxGeometry(0.14, 0.12, 0.12);
-    this.capMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      vertexColors: true,
-      fog: false,
-      toneMapped: false,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    const capGeo = new THREE.BoxGeometry(0.22, 0.28, 0.22);
+    this.capMaterial = createBarCapMaterial();
     this.capMesh = new THREE.InstancedMesh(capGeo, this.capMaterial, this.barCount);
     this.capMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.capMesh.frustumCulled = false;
     this.capMesh.renderOrder = 3;
 
-    const outerR = INNER_RADIUS + MAX_BAR_LENGTH + 0.3;
-    this.baseRing = this.createGlowMesh(
-      new THREE.RingGeometry(outerR - 0.12, outerR + 0.08, 80),
-      0.4,
+    const hubGeo = new THREE.CylinderGeometry(0.35, 0.45, 0.2, 32);
+    this.centerHub = new THREE.Mesh(hubGeo, createAccentSolidMaterial(this.theme.accent));
+    this.centerHub.position.y = 0.1;
+    this.centerHub.renderOrder = 1;
+
+    const rippleGeo = new THREE.RingGeometry(INNER_RADIUS + 0.2, INNER_RADIUS + 0.45, 64);
+    this.rippleRing = new THREE.Mesh(
+      rippleGeo,
+      createAccentGlowMaterial(this.theme.accent, 0.28),
     );
-    this.innerGlow = this.createGlowMesh(new THREE.RingGeometry(0.5, 1.8, 48), 0.14);
-    this.floorGlow = this.createGlowMesh(new THREE.CircleGeometry(outerR + 0.5, 64), 0.09, true);
+    this.rippleRing.rotation.x = -Math.PI / 2;
+    this.rippleRing.position.y = 0.08;
+    this.rippleRing.renderOrder = 1;
 
     for (let i = 0; i < this.barCount; i++) {
-      this.lengths[i] = MIN_BAR_SCALE + Math.sin(i * 0.3) * 0.05;
+      this.lengths[i] = MIN_BAR_SCALE + Math.sin(i * 0.35) * 0.1;
+      this.targets[i] = this.lengths[i];
     }
 
     this.refreshThemeColors();
     this.layoutBars();
-    this.root.add(this.floorGlow, this.innerGlow, this.baseRing, this.mesh, this.capMesh);
-  }
-
-  private createGlowMesh(
-    geometry: THREE.BufferGeometry,
-    opacity: number,
-    isCircle = false,
-  ): THREE.Mesh {
-    const mat = new THREE.MeshBasicMaterial({
-      color: this.theme.accent,
-      transparent: true,
-      opacity,
-      side: THREE.DoubleSide,
-      fog: false,
-      toneMapped: false,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geometry, mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = isCircle ? 0.005 : 0.02;
-    mesh.renderOrder = 0;
-    return mesh;
+    this.root.add(this.rippleRing, this.centerHub, this.mesh, this.capMesh);
   }
 
   private refreshThemeColors(): void {
     this.accentColor.setHex(this.theme.accent);
     for (let i = 0; i < this.barCount; i++) {
       const t = i / this.barCount;
-      const lightness = 0.72 + Math.sin(t * Math.PI * 2) * 0.08;
+      const lightness = 0.88 + Math.sin(t * Math.PI * 2) * 0.08;
       const [r, g, b] = hslToRgb(
         this.theme.hueStart + t * this.theme.hueRange,
-        Math.min(1, this.theme.saturation + 0.05),
+        this.theme.saturation,
         lightness,
       );
       this.baseColors[i * 3] = r;
       this.baseColors[i * 3 + 1] = g;
       this.baseColors[i * 3 + 2] = b;
     }
-    this.applyInstanceColors(1, 0);
+    this.applyInstanceColors(0);
   }
 
-  private applyInstanceColors(envelope: number, beat: number): void {
-    const displayEnvelope = Math.max(0.55, envelope);
-    const beatPulse = 1 + beat * 0.55;
-    const accentMix = 0.22 + beat * 0.18;
+  private applyInstanceColors(beat: number): void {
+    const beatPulse = 1 + beat * 0.85;
 
     for (let i = 0; i < this.barCount; i++) {
       const len = this.lengths[i];
-      const intensity = Math.min(1, (len / 2.5) * displayEnvelope);
-      const bright = (0.72 + intensity * 0.5 + beat * 0.28) * beatPulse;
+      const norm = Math.min(1, (len - MIN_BAR_SCALE) / 2.5);
+      const bright = (0.92 + norm * 0.42 + beat * 0.3) * beatPulse;
+      const accentMix = 0.15 + beat * 0.22 * norm;
 
       const base = i * 3;
       const r = this.baseColors[base] * bright + this.accentColor.r * accentMix;
@@ -140,17 +114,12 @@ export class PolarSpectrum extends BaseVisualizer {
 
       this.colorHelper.setRGB(Math.min(1, r), Math.min(1, g), Math.min(1, b));
       this.mesh.setColorAt(i, this.colorHelper);
-      this.colorHelper.multiplyScalar(1.35);
+      this.colorHelper.multiplyScalar(1.35 + norm * 0.3);
       this.capMesh.setColorAt(i, this.colorHelper);
     }
 
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     if (this.capMesh.instanceColor) this.capMesh.instanceColor.needsUpdate = true;
-
-    const ringPulse = 0.36 + beat * 0.25;
-    (this.baseRing.material as THREE.MeshBasicMaterial).opacity = ringPulse;
-    (this.innerGlow.material as THREE.MeshBasicMaterial).opacity = 0.1 + beat * 0.12;
-    (this.floorGlow.material as THREE.MeshBasicMaterial).opacity = 0.06 + beat * 0.06;
   }
 
   private layoutBars(): void {
@@ -159,14 +128,14 @@ export class PolarSpectrum extends BaseVisualizer {
       const len = Math.max(MIN_BAR_SCALE, this.lengths[i]);
       const midR = INNER_RADIUS + len * 0.5;
 
-      this.dummy.position.set(Math.cos(angle) * midR, 0.05, Math.sin(angle) * midR);
+      this.dummy.position.set(Math.cos(angle) * midR, 0.12, Math.sin(angle) * midR);
       this.dummy.rotation.set(0, -angle, 0);
       this.dummy.scale.set(len, 1, 1);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
 
-      const tipR = INNER_RADIUS + len + 0.06;
-      this.dummy.position.set(Math.cos(angle) * tipR, 0.05, Math.sin(angle) * tipR);
+      const tipR = INNER_RADIUS + len + 0.08;
+      this.dummy.position.set(Math.cos(angle) * tipR, 0.12, Math.sin(angle) * tipR);
       this.dummy.rotation.set(0, -angle, 0);
       this.dummy.scale.set(1, 1, 1);
       this.dummy.updateMatrix();
@@ -178,34 +147,64 @@ export class PolarSpectrum extends BaseVisualizer {
 
   protected onThemeChanged(): void {
     this.accentColor.setHex(this.theme.accent);
-    (this.baseRing.material as THREE.MeshBasicMaterial).color.setHex(this.theme.accent);
-    (this.innerGlow.material as THREE.MeshBasicMaterial).color.setHex(this.theme.accent);
-    (this.floorGlow.material as THREE.MeshBasicMaterial).color.setHex(this.theme.accent);
+    (this.centerHub.material as THREE.MeshPhongMaterial).color.setHex(this.theme.accent);
+    (this.centerHub.material as THREE.MeshPhongMaterial).emissive.setHex(this.theme.accent);
+    (this.rippleRing.material as THREE.MeshBasicMaterial).color.setHex(this.theme.accent);
     this.refreshThemeColors();
   }
 
   update(data: AudioData, delta: number, envelope: number, beat: number): void {
     const freq = data.frequency;
-    const displayEnvelope = Math.max(0.55, envelope);
+    const displayEnvelope = Math.max(envelope, motion.displayEnvelopeMin);
+
+    let bass = 0;
+    if (freq.length) {
+      const end = Math.floor(freq.length * 0.08);
+      for (let i = 0; i < end; i++) bass += freq[i];
+      bass = bass / end / 255;
+    }
 
     if (!freq.length) {
-      this.idlePhase += delta * 2.5;
+      this.idlePhase += delta * 2.2;
       for (let i = 0; i < this.barCount; i++) {
-        const wave = MIN_BAR_SCALE + 0.16 + Math.sin(this.idlePhase + i * 0.25) * 0.12;
-        this.lengths[i] += (wave - this.lengths[i]) * 0.12;
+        this.targets[i] =
+          MIN_BAR_SCALE +
+          0.28 +
+          Math.sin(this.idlePhase + i * 0.3) * motion.idleAmplitude;
       }
     } else {
       for (let i = 0; i < this.barCount; i++) {
         const idx = freqIndexForBar(i, this.barCount, freq.length);
         const raw = freq[idx] / 255;
-        const value = raw * displayEnvelope;
-        const target = MIN_BAR_SCALE + value * this.sensitivity * 3.2 * (1 + beat * 0.45);
-        this.lengths[i] += (target - this.lengths[i]) * 0.28;
+        const value = Math.pow(raw, 0.85) * displayEnvelope;
+        this.targets[i] =
+          MIN_BAR_SCALE +
+          value * this.sensitivity * motion.audioGain * (1 + beat * motion.beatGain);
       }
     }
 
+    for (let i = 0; i < this.barCount; i++) {
+      this.lengths[i] = smoothToward(
+        this.lengths[i],
+        this.targets[i],
+        motion.attack,
+        motion.release,
+      );
+    }
+
+    const hubScale = 1 + bass * 0.55 * displayEnvelope + beat * 0.38;
+    this.centerHub.scale.set(hubScale, 1, hubScale);
+    (this.centerHub.material as THREE.MeshPhongMaterial).emissiveIntensity =
+      0.45 + bass * 0.35 + beat * 0.4;
+
+    const rippleScale = 1 + bass * 0.95 + beat * 0.45;
+    this.rippleRing.scale.set(rippleScale, rippleScale, 1);
+    (this.rippleRing.material as THREE.MeshBasicMaterial).opacity =
+      0.12 + bass * 0.35 + beat * 0.22;
+
+    this.root.rotation.y += delta * (0.06 + beat * 0.1);
     this.layoutBars();
-    this.applyInstanceColors(displayEnvelope, beat);
+    this.applyInstanceColors(beat);
   }
 
   dispose(): void {
@@ -213,12 +212,10 @@ export class PolarSpectrum extends BaseVisualizer {
     this.material.dispose();
     this.capMesh.geometry.dispose();
     this.capMaterial.dispose();
-    this.baseRing.geometry.dispose();
-    (this.baseRing.material as THREE.Material).dispose();
-    this.innerGlow.geometry.dispose();
-    (this.innerGlow.material as THREE.Material).dispose();
-    this.floorGlow.geometry.dispose();
-    (this.floorGlow.material as THREE.Material).dispose();
+    this.centerHub.geometry.dispose();
+    (this.centerHub.material as THREE.Material).dispose();
+    this.rippleRing.geometry.dispose();
+    (this.rippleRing.material as THREE.Material).dispose();
     this.scene.remove(this.root);
   }
 }

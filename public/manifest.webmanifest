@@ -4,8 +4,8 @@
   "description": "浏览器端音乐可视化 — 频谱、波形、粒子、圆盘",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#12122a",
-  "theme_color": "#12122a",
+  "background_color": "#5858a8",
+  "theme_color": "#5858a8",
   "icons": [
     {
       "src": "/favicon.svg",

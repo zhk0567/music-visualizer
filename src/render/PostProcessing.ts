@@ -16,7 +16,7 @@ export class PostProcessing {
 
     const size = new THREE.Vector2();
     renderer.getSize(size);
-    this.bloomPass = new UnrealBloomPass(size, 0.8, 0.4, 0.2);
+    this.bloomPass = new UnrealBloomPass(size, 0.75, 0.45, 0.42);
     this.composer.addPass(this.bloomPass);
   }
 

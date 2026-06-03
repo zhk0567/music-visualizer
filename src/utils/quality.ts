@@ -1,9 +1,9 @@
 export type QualityLevel = 'low' | 'medium' | 'high';
 
 export const PARTICLE_COUNTS: Record<QualityLevel, number> = {
-  low: 2000,
-  medium: 3500,
-  high: 5000,
+  low: 1200,
+  medium: 2100,
+  high: 3200,
 };
 
 export const BAR_COUNTS: Record<QualityLevel, number> = {

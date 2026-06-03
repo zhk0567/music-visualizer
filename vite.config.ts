@@ -27,8 +27,8 @@ export default defineConfig({
         name: '音乐可视化',
         short_name: 'Visualizer',
         description: '浏览器端音乐可视化 — 频谱、波形、粒子、圆盘',
-        theme_color: '#12122a',
-        background_color: '#12122a',
+        theme_color: '#5858a8',
+        background_color: '#5858a8',
         display: 'standalone',
         icons: [
           {

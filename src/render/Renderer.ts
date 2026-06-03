@@ -13,12 +13,11 @@ import {
   shouldUseAntialias,
   type QualityLevel,
 } from '../utils/quality';
-import { getBloomStrength, getFogDensity, MODE_PROFILES, type VisualizerName } from './modeProfiles';
+import { getBloomStrength, MODE_PROFILES, type VisualizerName } from './modeProfiles';
+import { createThemeGradientBackground } from './visualizers/visualMaterials';
 
 export type { VisualizerName };
 export type TickCallback = (delta: number) => void;
-
-const IDLE_FRAME_MS = 50;
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -41,9 +40,11 @@ export class Renderer {
   private tickCallbacks: TickCallback[] = [];
   private reduceMotion: boolean;
   private beatIntensity = 0;
+  private visualizerGeneration = 0;
 
   private ambientLight!: THREE.AmbientLight;
   private pointLight!: THREE.PointLight;
+  private hemisphereLight!: THREE.HemisphereLight;
 
   private onVisibilityChange = (): void => {
     if (document.hidden) {
@@ -85,8 +86,21 @@ export class Renderer {
   }
 
   private applySceneAtmosphere(_quality: QualityLevel): void {
-    this.scene.fog = new THREE.FogExp2(this.theme.fog, getFogDensity(this.currentName));
+    this.scene.fog = null;
+    this.scene.background = createThemeGradientBackground(
+      this.theme.skyGradient,
+      this.theme.background,
+    );
     this.renderer.setClearColor(this.theme.background, 1);
+    this.updateLightingForTheme();
+  }
+
+  private updateLightingForTheme(): void {
+    if (!this.hemisphereLight) return;
+    this.hemisphereLight.color.setHex(this.theme.skyLight);
+    this.hemisphereLight.groundColor.setHex(this.theme.groundLight);
+    this.ambientLight.color.setHex(this.theme.ambient);
+    this.pointLight.color.setHex(this.theme.pointLight);
   }
 
   private syncPostProcessingForMode(): void {
@@ -119,10 +133,11 @@ export class Renderer {
   }
 
   private setupSceneLighting(): void {
-    this.ambientLight = new THREE.AmbientLight(this.theme.ambient, 0.5);
-    this.pointLight = new THREE.PointLight(this.theme.pointLight, 2, 20);
-    this.pointLight.position.set(0, 5, 0);
-    this.scene.add(this.ambientLight, this.pointLight);
+    this.hemisphereLight = new THREE.HemisphereLight(this.theme.skyLight, this.theme.groundLight, 0.85);
+    this.ambientLight = new THREE.AmbientLight(this.theme.ambient, 0.85);
+    this.pointLight = new THREE.PointLight(this.theme.pointLight, 3, 28);
+    this.pointLight.position.set(0, 7, 4);
+    this.scene.add(this.hemisphereLight, this.ambientLight, this.pointLight);
   }
 
   setAudioEngine(engine: AudioEngine): void {
@@ -202,30 +217,36 @@ export class Renderer {
 
     this.clearVisualizer();
     this.currentName = name;
+    const loadId = ++this.visualizerGeneration;
     const options = this.buildVisualizerOptions();
 
     switch (name) {
       case 'spectrum': {
         const { SpectrumBars } = await import('./visualizers/SpectrumBars');
+        if (loadId !== this.visualizerGeneration) return;
         this.visualizer = new SpectrumBars(this.scene, options);
         break;
       }
       case 'waveform': {
         const { Waveform } = await import('./visualizers/Waveform');
+        if (loadId !== this.visualizerGeneration) return;
         this.visualizer = new Waveform(this.scene, options);
         break;
       }
       case 'particles': {
         const { ParticleField } = await import('./visualizers/ParticleField');
+        if (loadId !== this.visualizerGeneration) return;
         this.visualizer = new ParticleField(this.scene, options);
         break;
       }
       case 'polar': {
         const { PolarSpectrum } = await import('./visualizers/PolarSpectrum');
+        if (loadId !== this.visualizerGeneration) return;
         this.visualizer = new PolarSpectrum(this.scene, options);
         break;
       }
     }
+    if (loadId !== this.visualizerGeneration) return;
     this.applySceneAtmosphere(this.quality);
     this.syncPostProcessingForMode();
     this.wakeUp();
@@ -243,8 +264,7 @@ export class Renderer {
   setTheme(name: ThemeName): void {
     this.theme = THEMES[name];
     this.applySceneAtmosphere(this.quality);
-    this.ambientLight.color.setHex(this.theme.ambient);
-    this.pointLight.color.setHex(this.theme.pointLight);
+    this.updateLightingForTheme();
     this.visualizer?.setTheme(this.theme);
     this.syncPostProcessingForMode();
     this.wakeUp();
@@ -290,13 +310,9 @@ export class Renderer {
     }
   }
 
-  private scheduleNextFrame(idle: boolean): void {
+  private scheduleNextFrame(_idle: boolean): void {
     if (!this.running) return;
-    if (idle) {
-      this.idleTimer = setTimeout(this.runFrame, IDLE_FRAME_MS);
-    } else {
-      this.animationId = requestAnimationFrame(this.runFrame);
-    }
+    this.animationId = requestAnimationFrame(this.runFrame);
   }
 
   private runFrame = (): void => {
@@ -329,9 +345,14 @@ export class Renderer {
 
       envelope = this.visualizer.applyEnvelope(isActive || hasSource, delta, motionScale);
       const displayEnvelope =
-        !isActive && !hasSource ? 1 : Math.max(envelope, 0.5);
+        !isActive && !hasSource ? 1 : Math.max(envelope, 0.55);
 
-      this.visualizer.update(data, delta, displayEnvelope, this.beatIntensity);
+      // 未播放时不喂静音 FFT，让各 visualizer 走待机动画
+      const visualData: AudioData = isActive
+        ? data
+        : { frequency: new Uint8Array(0), timeDomain: new Uint8Array(0) };
+
+      this.visualizer.update(visualData, delta, displayEnvelope, this.beatIntensity);
     }
 
     if (isActive || hasSource) {
