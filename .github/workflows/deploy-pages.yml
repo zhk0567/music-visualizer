@@ -1,5 +1,7 @@
 name: Deploy to GitHub Pages
 
+# 首次部署前：仓库 Settings → Pages → Build and deployment → Source 选「GitHub Actions」
+
 on:
   push:
     branches: [master]
@@ -19,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v4
 
       - uses: actions/setup-node@v4
         with:

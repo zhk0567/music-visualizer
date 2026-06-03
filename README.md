@@ -16,11 +16,17 @@
 
 ## 在线演示
 
-推送 `master` 后，GitHub Actions 会自动部署到 GitHub Pages：
-
 **https://zhk0567.github.io/music-visualizer/**
 
-首次启用需在仓库 **Settings → Pages → Build and deployment** 中选择 **GitHub Actions** 作为来源。
+### 首次启用 GitHub Pages（必做）
+
+若 Actions 部署报 `Failed to create deployment (404)`，说明 Pages 尚未开启：
+
+1. 打开 [仓库 Pages 设置](https://github.com/zhk0567/music-visualizer/settings/pages)
+2. **Build and deployment → Source** 选择 **GitHub Actions**（不要选 Deploy from a branch）
+3. 回到 [Actions](https://github.com/zhk0567/music-visualizer/actions/workflows/deploy-pages.yml) → **Deploy to GitHub Pages** → **Run workflow** 重新运行
+
+推送 `master` 后也会自动触发部署。
 
 ## 快速开始
 
