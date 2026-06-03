@@ -69,6 +69,7 @@ async function main(): Promise<void> {
   renderer.setAudioEngine(engine);
   renderer.setQuality(settings.quality);
   renderer.setSensitivity(settings.sensitivity);
+  renderer.setBeatSensitivity(settings.beatSensitivity);
   renderer.setTheme(settings.theme);
   await renderer.setVisualizer(settings.visualizer);
   renderer.start();

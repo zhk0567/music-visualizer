@@ -39,6 +39,7 @@ export class Renderer {
   private running = false;
   private tickCallbacks: TickCallback[] = [];
   private reduceMotion: boolean;
+  private reduceMotionQuery: MediaQueryList;
   private beatIntensity = 0;
   private visualizerGeneration = 0;
 
@@ -56,9 +57,15 @@ export class Renderer {
     }
   };
 
+  private onReduceMotionChange = (event: MediaQueryListEvent): void => {
+    this.reduceMotion = event.matches;
+  };
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reduceMotion = this.reduceMotionQuery.matches;
+    this.reduceMotionQuery.addEventListener('change', this.onReduceMotionChange);
 
     this.renderer = this.createWebGLRenderer('medium');
 
@@ -411,6 +418,7 @@ export class Renderer {
     this.stop();
     window.removeEventListener('resize', this.handleResize);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.reduceMotionQuery.removeEventListener('change', this.onReduceMotionChange);
     this.clearVisualizer();
     this.postProcessing?.dispose();
     this.renderer.dispose();

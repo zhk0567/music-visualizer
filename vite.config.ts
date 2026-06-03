@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const base = process.env.BASE_PATH ?? '/';
+
 export default defineConfig({
+  base,
   root: '.',
   publicDir: 'public',
   build: {
@@ -30,6 +33,7 @@ export default defineConfig({
         theme_color: '#5858a8',
         background_color: '#5858a8',
         display: 'standalone',
+        start_url: base,
         icons: [
           {
             src: '/favicon.svg',

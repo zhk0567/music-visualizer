@@ -10,6 +10,7 @@ export interface NamedPreset {
   theme: ThemeName;
   quality: QualityLevel;
   sensitivity: number;
+  beatSensitivity?: number;
   loop?: boolean;
   analyserPreset?: AnalyserPreset;
 }
@@ -37,6 +38,7 @@ export function loadPresets(): NamedPreset[] {
           theme: normalized.theme,
           quality: normalized.quality,
           sensitivity: normalized.sensitivity,
+          beatSensitivity: normalized.beatSensitivity,
           loop: typeof record.loop === 'boolean' ? record.loop : normalized.loop,
           analyserPreset:
             typeof record.analyserPreset === 'string'
@@ -61,6 +63,7 @@ export function addPreset(name: string, settings: AppSettings): NamedPreset[] {
     theme: settings.theme,
     quality: settings.quality,
     sensitivity: settings.sensitivity,
+    beatSensitivity: settings.beatSensitivity,
     loop: settings.loop,
     analyserPreset: settings.analyserPreset,
   });

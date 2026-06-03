@@ -8,6 +8,7 @@ export type AnalyserPreset = 'responsive' | 'smooth';
 export interface AppSettings {
   volume: number;
   sensitivity: number;
+  beatSensitivity: number;
   visualizer: VisualizerName;
   theme: ThemeName;
   muted: boolean;
@@ -25,6 +26,7 @@ const QUALITIES: QualityLevel[] = ['low', 'medium', 'high'];
 const DEFAULTS: AppSettings = {
   volume: 0.8,
   sensitivity: 1.5,
+  beatSensitivity: 1,
   visualizer: 'spectrum',
   theme: 'neon',
   muted: false,
@@ -55,6 +57,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
   return {
     volume: clamp(obj.volume, 0, 1, DEFAULTS.volume),
     sensitivity: clamp(obj.sensitivity, 0.5, 3, DEFAULTS.sensitivity),
+    beatSensitivity: clamp(obj.beatSensitivity, 0.5, 2, DEFAULTS.beatSensitivity),
     visualizer: pickEnum(obj.visualizer, VISUALIZERS, DEFAULTS.visualizer),
     theme: pickEnum(obj.theme, THEME_LIST, DEFAULTS.theme),
     muted: typeof obj.muted === 'boolean' ? obj.muted : DEFAULTS.muted,
@@ -89,8 +92,9 @@ export function saveSettings(settings: Partial<AppSettings>): void {
   }, 300);
 }
 
-export function readSettingsFromUrl(): Partial<AppSettings> | null {
-  const params = new URLSearchParams(window.location.search);
+export function readSettingsFromUrl(search?: string): Partial<AppSettings> | null {
+  const query = search ?? window.location.search;
+  const params = new URLSearchParams(query);
   if ([...params.keys()].length === 0) return null;
 
   const partial: Partial<AppSettings> = {};
@@ -99,12 +103,14 @@ export function readSettingsFromUrl(): Partial<AppSettings> | null {
   const quality = params.get('quality');
   const loop = parseBool(params.get('loop'));
   const sensitivity = params.get('sensitivity');
+  const beat = params.get('beat');
 
   if (mode) partial.visualizer = pickEnum(mode, VISUALIZERS, DEFAULTS.visualizer);
   if (theme) partial.theme = pickEnum(theme, THEME_LIST, DEFAULTS.theme);
   if (quality) partial.quality = pickEnum(quality, QUALITIES, DEFAULTS.quality);
   if (loop !== undefined) partial.loop = loop;
   if (sensitivity !== null) partial.sensitivity = clamp(Number(sensitivity), 0.5, 3, DEFAULTS.sensitivity);
+  if (beat !== null) partial.beatSensitivity = clamp(Number(beat), 0.5, 2, DEFAULTS.beatSensitivity);
 
   return partial;
 }
@@ -116,6 +122,7 @@ export function syncSettingsToUrl(settings: AppSettings): void {
   url.searchParams.set('quality', settings.quality);
   url.searchParams.set('loop', String(settings.loop));
   url.searchParams.set('sensitivity', String(settings.sensitivity));
+  url.searchParams.set('beat', String(settings.beatSensitivity));
   window.history.replaceState({}, '', url);
 }
 
@@ -126,5 +133,6 @@ export function buildShareUrl(settings: AppSettings): string {
   url.searchParams.set('quality', settings.quality);
   url.searchParams.set('loop', String(settings.loop));
   url.searchParams.set('sensitivity', String(settings.sensitivity));
+  url.searchParams.set('beat', String(settings.beatSensitivity));
   return url.toString();
 }

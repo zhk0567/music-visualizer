@@ -2,12 +2,29 @@
   "name": "music-visualizer",
   "private": true,
   "version": "1.0.0",
+  "description": "Browser-based music visualizer with spectrum, waveform, particles, and polar modes.",
+  "license": "MIT",
+  "homepage": "https://zhk0567.github.io/music-visualizer/",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhk0567/music-visualizer.git"
+  },
+  "keywords": [
+    "music-visualizer",
+    "three.js",
+    "web-audio",
+    "vite"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "vite",
     "generate-demo": "node scripts/generate-demo.mjs",
     "prebuild": "node scripts/generate-demo.mjs",
     "build": "tsc && vite build",
+    "postbuild": "node scripts/copy-spa-fallback.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

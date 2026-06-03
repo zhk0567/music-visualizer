@@ -190,7 +190,9 @@ export class Controls {
     this.beatSlider.step = '0.1';
     this.beatSlider.value = '1';
     this.beatSlider.addEventListener('input', () => {
-      this.renderer.setBeatSensitivity(Number(this.beatSlider.value));
+      const beat = Number(this.beatSlider.value);
+      this.renderer.setBeatSensitivity(beat);
+      saveSettings({ beatSensitivity: beat });
     });
 
     this.qualitySelect = document.createElement('select');
@@ -371,8 +373,8 @@ export class Controls {
     this.engine.setVolume(settings.volume);
     this.sensitivitySlider.value = String(settings.sensitivity);
     this.renderer.setSensitivity(settings.sensitivity);
-    this.beatSlider.value = '1';
-    this.renderer.setBeatSensitivity(1);
+    this.beatSlider.value = String(settings.beatSensitivity);
+    this.renderer.setBeatSensitivity(settings.beatSensitivity);
     this.engine.setLoop(settings.loop);
     this.loopBtn.classList.toggle('active', settings.loop);
     this.loopBtn.setAttribute('aria-pressed', String(settings.loop));
@@ -681,6 +683,9 @@ export class Controls {
 
     this.sensitivitySlider.value = String(preset.sensitivity);
     this.renderer.setSensitivity(preset.sensitivity);
+    const beat = preset.beatSensitivity ?? 1;
+    this.beatSlider.value = String(beat);
+    this.renderer.setBeatSensitivity(beat);
     this.qualitySelect.value = preset.quality;
     this.renderer.setQuality(preset.quality);
     await this.setMode(preset.visualizer, false);
@@ -699,6 +704,7 @@ export class Controls {
       theme: preset.theme,
       quality: preset.quality,
       sensitivity: preset.sensitivity,
+      beatSensitivity: beat,
       loop: preset.loop,
       analyserPreset: preset.analyserPreset,
     });
